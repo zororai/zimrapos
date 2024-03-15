@@ -1757,6 +1757,94 @@
                                     "data": {
                                         "type": "array",
                                         "items": {
+                                            "required": [
+                                                "customer_id",
+                                                "currency_id",
+                                                "products"
+                                            ],
+                                            "properties": {
+                                                "customer_id": {
+                                                    "type": "string",
+                                                    "example": ""
+                                                },
+                                                "currency_id": {
+                                                    "type": "string",
+                                                    "example": ""
+                                                },
+                                                "products": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "required": [
+                                                            "id",
+                                                            "selling_price",
+                                                            "quantity"
+                                                        ],
+                                                        "properties": {
+                                                            "id": {
+                                                                "type": "string",
+                                                                "example": ""
+                                                            },
+                                                            "selling_price": {
+                                                                "type": "number",
+                                                                "example": 10.2
+                                                            },
+                                                            "quantity": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            },
+                                                            "discount": {
+                                                                "type": "number",
+                                                                "example": 0
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                },
+                                                "date_format": {
+                                                    "type": "string",
+                                                    "example": "dd/mm/yy"
+                                                },
+                                                "payment_due": {
+                                                    "type": "string",
+                                                    "example": "2025-04-18T15:40:00.546Z"
+                                                },
+                                                "payment_information": {
+                                                    "type": "string",
+                                                    "example": "Please make all payments to our CBZ Bank Account 0100000000"
+                                                },
+                                                "terms_n_conditions": {
+                                                    "type": "string",
+                                                    "example": "This invoice will be considered invalid when the payment due date has lapsed"
+                                                },
+                                                "recipients": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string"
+                                                    },
+                                                    "example": []
+                                                },
+                                                "is_proforma": {
+                                                    "type": "boolean",
+                                                    "example": false
+                                                },
+                                                "template_preference": {
+                                                    "properties": {
+                                                        "template": {
+                                                            "type": "integer",
+                                                            "example": 0
+                                                        },
+                                                        "color": {
+                                                            "type": "string",
+                                                            "example": "no_color"
+                                                        },
+                                                        "table_layout": {
+                                                            "type": "string",
+                                                            "example": "Plain"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                }
+                                            },
                                             "type": "object"
                                         }
                                     },
