@@ -28,16 +28,29 @@ class InvoiceController extends BaseController
      *             required={"data"},
      *             @OA\Property(property="data", type="array", minItems=1, maxItems=50,
      *                 @OA\Items(type="object",
+     *                     required={"customer_id", "currency_id", "products"},
      *                     @OA\Property(property="customer_id", type="string"),
      *                     @OA\Property(property="currency_id", type="string"),
      *                     @OA\Property(property="products", type="array",
      *                         @OA\Items(type="object",
+     *                             required={"id", "selling_price", "quantity"},
      *                             @OA\Property(property="id", type="string"),
-     *                             @OA\Property(property="quantity", type="integer")
+     *                             @OA\Property(property="selling_price", type="number", format="float"),
+     *                             @OA\Property(property="quantity", type="integer", minimum=1),
+     *                             @OA\Property(property="discount", type="number", format="float", default=0)
      *                         )
      *                     ),
-     *                     @OA\Property(property="due_date", type="string", format="date"),
-     *                     @OA\Property(property="recipients", type="array", @OA\Items(type="string", format="email"))
+     *                     @OA\Property(property="date_format", type="string", example="dd/mm/yy"),
+     *                     @OA\Property(property="payment_due", type="string", format="date-time", example="2025-04-18T15:40:00.546Z"),
+     *                     @OA\Property(property="payment_information", type="string", example="Please make all payments to our CBZ Bank Account"),
+     *                     @OA\Property(property="terms_n_conditions", type="string", example="Invoice invalid after due date"),
+     *                     @OA\Property(property="recipients", type="array", @OA\Items(type="string", format="email")),
+     *                     @OA\Property(property="is_proforma", type="boolean", default=false),
+     *                     @OA\Property(property="template_preference", type="object",
+     *                         @OA\Property(property="template", type="integer", default=0),
+     *                         @OA\Property(property="color", type="string", default="no_color"),
+     *                         @OA\Property(property="table_layout", type="string", default="Plain")
+     *                     )
      *                 )
      *             ),
      *             @OA\Property(property="zimra_fiscalize", type="boolean", default=false)
@@ -56,6 +69,20 @@ class InvoiceController extends BaseController
     {
         $validated = $request->validate([
             'data' => 'required|array|min:1|max:50',
+            'data.*.customer_id' => 'required|string',
+            'data.*.currency_id' => 'required|string',
+            'data.*.products' => 'required|array|min:1',
+            'data.*.products.*.id' => 'required|string',
+            'data.*.products.*.selling_price' => 'required|numeric',
+            'data.*.products.*.quantity' => 'required|integer|min:1',
+            'data.*.products.*.discount' => 'nullable|numeric',
+            'data.*.date_format' => 'nullable|string',
+            'data.*.payment_due' => 'nullable|string',
+            'data.*.payment_information' => 'nullable|string',
+            'data.*.terms_n_conditions' => 'nullable|string',
+            'data.*.recipients' => 'nullable|array',
+            'data.*.is_proforma' => 'nullable|boolean',
+            'data.*.template_preference' => 'nullable|array',
             'zimra_fiscalize' => 'boolean',
         ]);
 
