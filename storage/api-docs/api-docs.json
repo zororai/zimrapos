@@ -1,0 +1,3089 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "Panier API Integration",
+        "description": "API endpoints for communicating with the Panier API - ZIMRA Fiscalisation Support.\r\n\r\n## Rate Limit\r\n500 API calls every 5 minutes for each unique IP Address.\r\n\r\n## Authentication\r\nRequires APP-ID and API-KEY headers obtained from your Panier company account's Developer API section.\r\n\r\n## ZIMRA Fiscalisation\r\nThis API supports ZIMRA Fiscal Invoices, Credit Notes and Debit Notes based on ZIMRA Fiscal Device Gateway API Specs v7.2.",
+        "contact": {
+            "email": "support@example.com"
+        },
+        "version": "1.0.0"
+    },
+    "paths": {
+        "/product/create": {
+            "post": {
+                "tags": [
+                    "Products"
+                ],
+                "summary": "Create products",
+                "description": "Create products in your Panier company",
+                "operationId": "createProducts",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "name",
+                                                "selling_price"
+                                            ],
+                                            "properties": {
+                                                "name": {
+                                                    "type": "string",
+                                                    "example": "Eggs"
+                                                },
+                                                "description": {
+                                                    "type": "string",
+                                                    "example": "One dozen large eggs"
+                                                },
+                                                "buying_price": {
+                                                    "type": "number",
+                                                    "format": "float",
+                                                    "example": 2.51
+                                                },
+                                                "selling_price": {
+                                                    "type": "number",
+                                                    "format": "float",
+                                                    "example": 5.81
+                                                },
+                                                "initial_quantity": {
+                                                    "type": "integer",
+                                                    "example": 100
+                                                },
+                                                "hs_code": {
+                                                    "type": "string",
+                                                    "example": "0808.01.01"
+                                                },
+                                                "sku": {
+                                                    "type": "string",
+                                                    "example": ""
+                                                },
+                                                "is_inventory_item": {
+                                                    "type": "boolean",
+                                                    "example": true
+                                                },
+                                                "applicable_tax_id": {
+                                                    "type": "string",
+                                                    "nullable": true
+                                                },
+                                                "suppliers": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string"
+                                                    },
+                                                    "nullable": true
+                                                }
+                                            },
+                                            "type": "object"
+                                        },
+                                        "maxItems": 1000,
+                                        "minItems": 1
+                                    },
+                                    "overwrite_duplicates": {
+                                        "type": "boolean",
+                                        "default": true,
+                                        "example": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Successfully created the products"
+                    },
+                    "400": {
+                        "description": "Request Body Validation Error"
+                    },
+                    "402": {
+                        "description": "Expired Panier company subscription"
+                    },
+                    "403": {
+                        "description": "Incorrect API Credentials"
+                    },
+                    "406": {
+                        "description": "Product Error"
+                    },
+                    "422": {
+                        "description": "Missing Headers"
+                    },
+                    "429": {
+                        "description": "Rate Limit exceeded"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/product/update": {
+            "put": {
+                "tags": [
+                    "Products"
+                ],
+                "summary": "Update products",
+                "description": "Update products in your Panier company. Cannot update quantities directly - use Stock endpoints.",
+                "operationId": "updateProducts",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string"
+                                                },
+                                                "name": {
+                                                    "type": "string",
+                                                    "example": "Eggs"
+                                                },
+                                                "description": {
+                                                    "type": "string"
+                                                },
+                                                "buying_price": {
+                                                    "type": "number",
+                                                    "format": "float"
+                                                },
+                                                "selling_price": {
+                                                    "type": "number",
+                                                    "format": "float"
+                                                },
+                                                "hs_code": {
+                                                    "type": "string"
+                                                },
+                                                "sku": {
+                                                    "type": "string"
+                                                },
+                                                "is_inventory_item": {
+                                                    "type": "boolean"
+                                                },
+                                                "applicable_tax_id": {
+                                                    "type": "string",
+                                                    "nullable": true
+                                                },
+                                                "suppliers": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string"
+                                                    },
+                                                    "nullable": true
+                                                }
+                                            },
+                                            "type": "object"
+                                        },
+                                        "maxItems": 1000,
+                                        "minItems": 1
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successfully updated the products"
+                    },
+                    "400": {
+                        "description": "Request Body Validation Error"
+                    },
+                    "402": {
+                        "description": "Expired Panier company subscription"
+                    },
+                    "403": {
+                        "description": "Incorrect API Credentials"
+                    },
+                    "406": {
+                        "description": "Product Error"
+                    },
+                    "422": {
+                        "description": "Missing Headers"
+                    },
+                    "429": {
+                        "description": "Rate Limit exceeded"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/product/search": {
+            "post": {
+                "tags": [
+                    "Products"
+                ],
+                "summary": "Search products",
+                "description": "Search products in your Panier company. Results returned in descending order of created_at.",
+                "operationId": "searchProducts",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "properties": {
+                                            "query": {
+                                                "type": "string",
+                                                "default": "*",
+                                                "example": "*"
+                                            },
+                                            "limit": {
+                                                "type": "integer",
+                                                "default": 10,
+                                                "example": 10
+                                            },
+                                            "skip": {
+                                                "type": "integer",
+                                                "default": 0,
+                                                "example": 0
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successfully searched the products"
+                    },
+                    "400": {
+                        "description": "Request Body Validation Error"
+                    },
+                    "402": {
+                        "description": "Expired Panier company subscription"
+                    },
+                    "403": {
+                        "description": "Incorrect API Credentials"
+                    },
+                    "422": {
+                        "description": "Missing Headers"
+                    },
+                    "429": {
+                        "description": "Rate Limit exceeded"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/product/delete": {
+            "post": {
+                "tags": [
+                    "Products"
+                ],
+                "summary": "Delete products",
+                "description": "Delete products in your Panier company",
+                "operationId": "deleteProducts",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "type": "object"
+                                        },
+                                        "maxItems": 1000,
+                                        "minItems": 1
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successfully deleted the products"
+                    },
+                    "400": {
+                        "description": "Request Body Validation Error"
+                    },
+                    "402": {
+                        "description": "Expired Panier company subscription"
+                    },
+                    "403": {
+                        "description": "Incorrect API Credentials"
+                    },
+                    "422": {
+                        "description": "Missing Headers"
+                    },
+                    "429": {
+                        "description": "Rate Limit exceeded"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/stock/add": {
+            "post": {
+                "tags": [
+                    "Stocks"
+                ],
+                "summary": "Add stock",
+                "description": "Add stock quantities to products",
+                "operationId": "addStock",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "product_id",
+                                                "quantity",
+                                                "description"
+                                            ],
+                                            "properties": {
+                                                "product_id": {
+                                                    "type": "string"
+                                                },
+                                                "quantity": {
+                                                    "type": "integer",
+                                                    "minimum": 1
+                                                },
+                                                "description": {
+                                                    "type": "string"
+                                                },
+                                                "suppliers": {
+                                                    "type": "string",
+                                                    "nullable": true
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successfully added stock"
+                    },
+                    "400": {
+                        "description": "Request Body Validation Error"
+                    },
+                    "429": {
+                        "description": "Rate Limit exceeded"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/stock/subtract": {
+            "post": {
+                "tags": [
+                    "Stocks"
+                ],
+                "summary": "Subtract stock",
+                "description": "Subtract stock quantities from products",
+                "operationId": "subtractStock",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "product_id",
+                                                "quantity",
+                                                "description"
+                                            ],
+                                            "properties": {
+                                                "product_id": {
+                                                    "type": "string"
+                                                },
+                                                "quantity": {
+                                                    "type": "integer",
+                                                    "minimum": 1
+                                                },
+                                                "description": {
+                                                    "type": "string"
+                                                },
+                                                "suppliers": {
+                                                    "type": "string",
+                                                    "nullable": true
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successfully subtracted stock"
+                    },
+                    "400": {
+                        "description": "Request Body Validation Error"
+                    },
+                    "429": {
+                        "description": "Rate Limit exceeded"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/customer/create": {
+            "post": {
+                "tags": [
+                    "Customers"
+                ],
+                "summary": "Create customers",
+                "operationId": "287bcd3e3abe76c0a765ae87e8883bf0",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "name"
+                                            ],
+                                            "properties": {
+                                                "name": {
+                                                    "type": "string"
+                                                },
+                                                "email": {
+                                                    "type": "string",
+                                                    "format": "email"
+                                                },
+                                                "phone": {
+                                                    "type": "string"
+                                                },
+                                                "address": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Success"
+                    },
+                    "400": {
+                        "description": "Error"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/customer/update": {
+            "put": {
+                "tags": [
+                    "Customers"
+                ],
+                "summary": "Update customers",
+                "operationId": "f4559ef0239e9c79960d64f932d644e2",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string"
+                                                },
+                                                "name": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/customer/search": {
+            "post": {
+                "tags": [
+                    "Customers"
+                ],
+                "summary": "Search customers",
+                "operationId": "81acff557b99b7cc18054ca547bcd347",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "properties": {
+                                            "query": {
+                                                "type": "string",
+                                                "default": "*"
+                                            },
+                                            "limit": {
+                                                "type": "integer",
+                                                "default": 10
+                                            },
+                                            "skip": {
+                                                "type": "integer",
+                                                "default": 0
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/customer/delete": {
+            "post": {
+                "tags": [
+                    "Customers"
+                ],
+                "summary": "Delete customers",
+                "operationId": "71e84c9012d8b0d47414dbb5d151fed7",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/supplier/create": {
+            "post": {
+                "tags": [
+                    "Suppliers"
+                ],
+                "summary": "Create suppliers",
+                "operationId": "82a606c7f1644e826babc741804907f6",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "name"
+                                            ],
+                                            "properties": {
+                                                "name": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/supplier/update": {
+            "put": {
+                "tags": [
+                    "Suppliers"
+                ],
+                "summary": "Update suppliers",
+                "operationId": "8fd3f50ce64d97d996ebdea9f97014ee",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/supplier/search": {
+            "post": {
+                "tags": [
+                    "Suppliers"
+                ],
+                "summary": "Search suppliers",
+                "operationId": "112838f79479288cc5dfd674d8dc61dc",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "properties": {
+                                            "query": {
+                                                "type": "string",
+                                                "default": "*"
+                                            },
+                                            "limit": {
+                                                "type": "integer",
+                                                "default": 10
+                                            },
+                                            "skip": {
+                                                "type": "integer",
+                                                "default": 0
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/supplier/delete": {
+            "post": {
+                "tags": [
+                    "Suppliers"
+                ],
+                "summary": "Delete suppliers",
+                "operationId": "ab91c4aca352911836a6573693c78754",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/tax/create": {
+            "post": {
+                "tags": [
+                    "Taxes"
+                ],
+                "summary": "Create taxes",
+                "operationId": "6f36454ce20aecd94ea93d3c19b5211e",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "name",
+                                                "percentage"
+                                            ],
+                                            "properties": {
+                                                "name": {
+                                                    "type": "string"
+                                                },
+                                                "percentage": {
+                                                    "type": "number"
+                                                },
+                                                "code": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/tax/update": {
+            "put": {
+                "tags": [
+                    "Taxes"
+                ],
+                "summary": "Update taxes",
+                "operationId": "baf816a1a0077d179bb8accafead75c1",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/tax/search": {
+            "post": {
+                "tags": [
+                    "Taxes"
+                ],
+                "summary": "Search taxes",
+                "operationId": "7819fcb7aca7b79c503cf183902a1ac9",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "properties": {
+                                            "query": {
+                                                "type": "string",
+                                                "default": "*"
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/tax/delete": {
+            "post": {
+                "tags": [
+                    "Taxes"
+                ],
+                "summary": "Delete taxes",
+                "operationId": "506c8d42246dc0510e1e34dcb3bc271c",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/currency/create": {
+            "post": {
+                "tags": [
+                    "Currencies"
+                ],
+                "summary": "Create currencies",
+                "description": "Supports 119 currencies",
+                "operationId": "3befcae24f3adab432f139d0fe196747",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "code"
+                                            ],
+                                            "properties": {
+                                                "code": {
+                                                    "type": "string",
+                                                    "example": "USD"
+                                                },
+                                                "exchange_rate": {
+                                                    "type": "number",
+                                                    "example": 1
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/currency/update": {
+            "put": {
+                "tags": [
+                    "Currencies"
+                ],
+                "summary": "Update currencies",
+                "operationId": "8c336449137c43fff29dc9978c6e933a",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string"
+                                                },
+                                                "exchange_rate": {
+                                                    "type": "number"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/currency/search": {
+            "post": {
+                "tags": [
+                    "Currencies"
+                ],
+                "summary": "Search currencies",
+                "operationId": "e9e4147969fda2609635d41e68eb89c8",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "properties": {
+                                            "query": {
+                                                "type": "string",
+                                                "default": "*"
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/currency/delete": {
+            "post": {
+                "tags": [
+                    "Currencies"
+                ],
+                "summary": "Delete currencies",
+                "operationId": "f61ff6a3adf368b7ca33add1020a9ca7",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/sale/create": {
+            "post": {
+                "tags": [
+                    "Sales"
+                ],
+                "summary": "Create a sale",
+                "description": "Create a sale with optional ZIMRA fiscalization",
+                "operationId": "14efb4baa3a5ce508835758c102b3b9f",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "properties": {
+                                            "customer_id": {
+                                                "type": "string",
+                                                "nullable": true
+                                            },
+                                            "currency_id": {
+                                                "type": "string"
+                                            },
+                                            "products": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object"
+                                                }
+                                            },
+                                            "payment_method": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "type": "object"
+                                    },
+                                    "zimra_fiscalize": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/sale/search": {
+            "post": {
+                "tags": [
+                    "Sales"
+                ],
+                "summary": "Search sales",
+                "operationId": "5b90bcddd7b6028c5b4d8f066d6904ab",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "properties": {
+                                            "query": {
+                                                "type": "string",
+                                                "default": "*"
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/sale/void": {
+            "post": {
+                "tags": [
+                    "Sales"
+                ],
+                "summary": "Void a sale",
+                "operationId": "5e97ed23e1d84736eb423cc001dc28cd",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "properties": {
+                                            "id": {
+                                                "type": "string"
+                                            },
+                                            "reason": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/sale/download": {
+            "get": {
+                "tags": [
+                    "Sales"
+                ],
+                "summary": "Download sale receipt as PDF",
+                "operationId": "45ffdc5077ef1fa5e23de4b6d041e793",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "PDF file"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/payment-provider/check-payment-status": {
+            "get": {
+                "tags": [
+                    "Sales"
+                ],
+                "summary": "Check payment status",
+                "operationId": "90d553532917e7ac1c799776679ee750",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Payment status"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/payment-provider/confirm-payment": {
+            "post": {
+                "tags": [
+                    "Sales"
+                ],
+                "summary": "Confirm payment",
+                "operationId": "d493195ee9a7c6634c4f6ebdf4352a11",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/invoice/create": {
+            "post": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Create invoices",
+                "description": "Create invoices with optional ZIMRA fiscalization",
+                "operationId": "5bec6634887372b030fc6efba08cc512",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "zimra_fiscalize": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/invoice/update": {
+            "put": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Update invoices",
+                "operationId": "924748caa6ecfb9e63ad75d35fca8cb3",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/invoice/search": {
+            "post": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Search invoices",
+                "operationId": "5401671fd0a544c8d56ff73f6652946a",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/invoice/convert-to-sale": {
+            "post": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Convert invoice to sale",
+                "operationId": "e7151e995007142a7162ea8feccdd8ef",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "properties": {
+                                            "invoice_id": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "type": "object"
+                                    },
+                                    "zimra_fiscalize": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/invoice/download": {
+            "get": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Download invoice as PDF",
+                "operationId": "bcfc112dd01d6d1741563bafed9d817e",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "PDF file"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/invoice/delete": {
+            "post": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Delete invoices",
+                "operationId": "322cd673a2b0ee39893612635e34c76e",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/debit-note/create": {
+            "post": {
+                "tags": [
+                    "Debit Notes"
+                ],
+                "summary": "Create debit notes",
+                "description": "Create debit notes with optional ZIMRA fiscalization. Only USD and ZWG supported for ZIMRA.",
+                "operationId": "ada5958266add92b779e74e73043e7dc",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "invoice_id",
+                                                "products",
+                                                "reason"
+                                            ],
+                                            "type": "object"
+                                        }
+                                    },
+                                    "zimra_fiscalize": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/debit-note/search": {
+            "post": {
+                "tags": [
+                    "Debit Notes"
+                ],
+                "summary": "Search debit notes",
+                "operationId": "aed4471b19c6c7c966c762ff79c43c85",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/debit-note/download": {
+            "get": {
+                "tags": [
+                    "Debit Notes"
+                ],
+                "summary": "Download debit note as PDF",
+                "operationId": "534e66c0ba754af21e40cad688e82d6d",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "PDF file"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/debit-note/delete": {
+            "post": {
+                "tags": [
+                    "Debit Notes"
+                ],
+                "summary": "Delete debit notes",
+                "operationId": "0bee1e61ca0bfbe865fb01c794814582",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/credit-note/create": {
+            "post": {
+                "tags": [
+                    "Credit Notes"
+                ],
+                "summary": "Create credit notes",
+                "description": "Create credit notes with optional ZIMRA fiscalization",
+                "operationId": "3311b2d7ae6b7ad070391088a2688f8b",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "sale_id",
+                                                "products",
+                                                "reason"
+                                            ],
+                                            "type": "object"
+                                        }
+                                    },
+                                    "zimra_fiscalize": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/credit-note/search": {
+            "post": {
+                "tags": [
+                    "Credit Notes"
+                ],
+                "summary": "Search credit notes",
+                "operationId": "9f266f455e4ce312fa21352c43efa3fe",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/credit-note/download": {
+            "get": {
+                "tags": [
+                    "Credit Notes"
+                ],
+                "summary": "Download credit note as PDF",
+                "operationId": "438d6516f2b2790f5f6ca50ff5f333ec",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "PDF file"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/credit-note/delete": {
+            "post": {
+                "tags": [
+                    "Credit Notes"
+                ],
+                "summary": "Delete credit notes",
+                "operationId": "1632fac93f992fe2c3c4f628caf4c7a7",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/delivery-note/create": {
+            "post": {
+                "tags": [
+                    "Delivery Notes"
+                ],
+                "summary": "Create delivery notes",
+                "operationId": "c257ab6436c17d004c5e4f039fc9c6bb",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/delivery-note/search": {
+            "post": {
+                "tags": [
+                    "Delivery Notes"
+                ],
+                "summary": "Search delivery notes",
+                "operationId": "d28a2d1457a99edd48707000374bc3b7",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/delivery-note/download": {
+            "get": {
+                "tags": [
+                    "Delivery Notes"
+                ],
+                "summary": "Download delivery note as PDF",
+                "operationId": "2f2d5bf5a9ffe8a7d43449634e6a4da4",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "PDF file"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/delivery-note/delete": {
+            "post": {
+                "tags": [
+                    "Delivery Notes"
+                ],
+                "summary": "Delete delivery notes",
+                "operationId": "7611bf82761d2042a613aa9fcf61c745",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/quotation/create": {
+            "post": {
+                "tags": [
+                    "Quotations"
+                ],
+                "summary": "Create quotations",
+                "operationId": "9969394628462b05251d710b61f8f48e",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/quotation/update": {
+            "put": {
+                "tags": [
+                    "Quotations"
+                ],
+                "summary": "Update quotations",
+                "operationId": "46dfb22495b1581a62b6099c93690077",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/quotation/search": {
+            "post": {
+                "tags": [
+                    "Quotations"
+                ],
+                "summary": "Search quotations",
+                "operationId": "029f8766c3786fdbe5679f1e2cfd6c53",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/quotation/convert-to-invoice": {
+            "post": {
+                "tags": [
+                    "Quotations"
+                ],
+                "summary": "Convert quotation to invoice",
+                "operationId": "0bf976da97b9504970949784d2ee6c4f",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "properties": {
+                                            "quotation_id": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/quotation/convert-to-sale": {
+            "post": {
+                "tags": [
+                    "Quotations"
+                ],
+                "summary": "Convert quotation to sale",
+                "operationId": "797b4dc944f1ad22a7a216029f038e8e",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "properties": {
+                                            "quotation_id": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "type": "object"
+                                    },
+                                    "zimra_fiscalize": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/quotation/download": {
+            "get": {
+                "tags": [
+                    "Quotations"
+                ],
+                "summary": "Download quotation as PDF",
+                "operationId": "2ab0c652cddab09b61ef8bdc81ea3506",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "PDF file"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/quotation/delete": {
+            "post": {
+                "tags": [
+                    "Quotations"
+                ],
+                "summary": "Delete quotations",
+                "operationId": "a0f4cc93b3aa2fb049abbf47a6bbb9a1",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id"
+                                            ],
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/zimra/open-day": {
+            "get": {
+                "tags": [
+                    "ZIMRA Fiscalisation"
+                ],
+                "summary": "Open ZIMRA fiscal day",
+                "description": "Must be called before creating fiscalized transactions",
+                "operationId": "92039c41cecf7ff92aade0390f551fe4",
+                "responses": {
+                    "200": {
+                        "description": "Fiscal day opened"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/zimra/close-day": {
+            "get": {
+                "tags": [
+                    "ZIMRA Fiscalisation"
+                ],
+                "summary": "Close ZIMRA fiscal day",
+                "description": "Should be called at the end of the business day",
+                "operationId": "bc14644b16fae5986a5a62430d468ff8",
+                "responses": {
+                    "200": {
+                        "description": "Fiscal day closed"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/zimra/fiscalize": {
+            "post": {
+                "tags": [
+                    "ZIMRA Fiscalisation"
+                ],
+                "summary": "Fiscalize a transaction",
+                "description": "Fiscalize a transaction with ZIMRA based on ZIMRA Fiscal Device Gateway API Specs v7.2",
+                "operationId": "09fa41ec9eba76464591d224b8315587",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "data"
+                                ],
+                                "properties": {
+                                    "data": {
+                                        "properties": {
+                                            "transaction_id": {
+                                                "type": "string"
+                                            },
+                                            "transaction_type": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "sale",
+                                                    "invoice",
+                                                    "credit_note",
+                                                    "debit_note"
+                                                ]
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Transaction fiscalized"
+                    }
+                },
+                "security": [
+                    {
+                        "AppId": [],
+                        "ApiKey": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        }
+    },
+    "components": {
+        "securitySchemes": {
+            "AppId": {
+                "type": "apiKey",
+                "description": "Panier APP-ID from Developer API section",
+                "name": "APP-ID",
+                "in": "header"
+            },
+            "ApiKey": {
+                "type": "apiKey",
+                "description": "Panier API-KEY from Developer API section",
+                "name": "API-KEY",
+                "in": "header"
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Products",
+            "description": "Manage products in your Panier company"
+        },
+        {
+            "name": "Stocks",
+            "description": "Manage stock quantities"
+        },
+        {
+            "name": "Customers",
+            "description": "Manage customers"
+        },
+        {
+            "name": "Suppliers",
+            "description": "Manage suppliers"
+        },
+        {
+            "name": "Taxes",
+            "description": "Manage taxes"
+        },
+        {
+            "name": "Currencies",
+            "description": "Manage currencies (119 supported)"
+        },
+        {
+            "name": "Sales",
+            "description": "Manage sales and payments"
+        },
+        {
+            "name": "Invoices",
+            "description": "Manage invoices"
+        },
+        {
+            "name": "Debit Notes",
+            "description": "Manage debit notes"
+        },
+        {
+            "name": "Credit Notes",
+            "description": "Manage credit notes"
+        },
+        {
+            "name": "Delivery Notes",
+            "description": "Manage delivery notes"
+        },
+        {
+            "name": "Quotations",
+            "description": "Manage quotations"
+        },
+        {
+            "name": "ZIMRA Fiscalisation",
+            "description": "ZIMRA fiscal day operations and fiscalization"
+        }
+    ]
+}
