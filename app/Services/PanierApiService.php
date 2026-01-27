@@ -220,11 +220,12 @@ class PanierApiService
 
     // ==================== SALES ====================
 
-    public function createSale(array $data, bool $zimraFiscalize = false): Response
+    public function createSale(array $data, bool $zimraFiscalize = false, array $paymentMethod = []): Response
     {
         return $this->client()->post("{$this->baseUrl}/sale/create", [
             'data' => $data,
             'zimra_fiscalize' => $zimraFiscalize,
+            'payment_method' => $paymentMethod,
         ]);
     }
 

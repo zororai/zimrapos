@@ -25,20 +25,34 @@ class SaleController extends BaseController
      *     @OA\RequestBody(
      *         required=true,
      *         @OA\JsonContent(
-     *             required={"data"},
+     *             required={"data", "payment_method"},
      *             @OA\Property(property="data", type="object",
+     *                 required={"currency_id", "products"},
      *                 @OA\Property(property="customer_id", type="string", nullable=true),
      *                 @OA\Property(property="currency_id", type="string"),
      *                 @OA\Property(property="products", type="array",
      *                     @OA\Items(type="object",
+     *                         required={"id", "selling_price", "quantity"},
      *                         @OA\Property(property="id", type="string"),
-     *                         @OA\Property(property="quantity", type="integer")
+     *                         @OA\Property(property="selling_price", type="number", format="float"),
+     *                         @OA\Property(property="quantity", type="integer", minimum=1),
+     *                         @OA\Property(property="discount", type="number", format="float", default=0)
      *                     )
      *                 ),
-     *                 @OA\Property(property="payment_method", type="string"),
-     *                 @OA\Property(property="recipients", type="array", @OA\Items(type="string", format="email"))
+     *                 @OA\Property(property="recipients", type="array", @OA\Items(type="string", format="email")),
+     *                 @OA\Property(property="template_preference", type="object",
+     *                     @OA\Property(property="template", type="integer", default=0),
+     *                     @OA\Property(property="color", type="string", default="no_color"),
+     *                     @OA\Property(property="table_layout", type="string", default="Plain")
+     *                 )
      *             ),
-     *             @OA\Property(property="zimra_fiscalize", type="boolean", default=false, description="Whether to fiscalize with ZIMRA. Only USD and ZWG supported.")
+     *             @OA\Property(property="zimra_fiscalize", type="boolean", default=false, description="Whether to fiscalize with ZIMRA. Only USD and ZWG supported."),
+     *             @OA\Property(property="payment_method", type="object",
+     *                 required={"type"},
+     *                 @OA\Property(property="type", type="string", example="PAYNOW_ECOCASH"),
+     *                 @OA\Property(property="phone", type="string", example="0772000001"),
+     *                 @OA\Property(property="email", type="string", format="email")
+     *             )
      *         )
      *     ),
      *     @OA\Response(response=201, description="Successfully created the sale"),
@@ -54,13 +68,26 @@ class SaleController extends BaseController
     {
         $validated = $request->validate([
             'data' => 'required|array',
+            'data.customer_id' => 'nullable|string',
+            'data.currency_id' => 'required|string',
             'data.products' => 'required|array|min:1',
+            'data.products.*.id' => 'required|string',
+            'data.products.*.selling_price' => 'required|numeric',
+            'data.products.*.quantity' => 'required|integer|min:1',
+            'data.products.*.discount' => 'nullable|numeric',
+            'data.recipients' => 'nullable|array',
+            'data.template_preference' => 'nullable|array',
             'zimra_fiscalize' => 'boolean',
+            'payment_method' => 'required|array',
+            'payment_method.type' => 'required|string',
+            'payment_method.phone' => 'nullable|string',
+            'payment_method.email' => 'nullable|email',
         ]);
 
         $response = $this->panierApi->createSale(
             $validated['data'],
-            $validated['zimra_fiscalize'] ?? false
+            $validated['zimra_fiscalize'] ?? false,
+            $validated['payment_method']
         );
         return $this->handleApiResponse($response);
     }
