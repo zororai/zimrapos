@@ -130,14 +130,14 @@ class DebitNoteController extends BaseController
      *     @OA\Response(response=429, description="Rate Limit exceeded")
      * )
      */
-    public function download(Request $request): JsonResponse
+    public function download(Request $request): \Symfony\Component\HttpFoundation\StreamedResponse|\Illuminate\Http\JsonResponse
     {
         $validated = $request->validate([
             'id' => 'required|string',
         ]);
 
         $response = $this->panierApi->downloadDebitNote($validated['id']);
-        return $this->handleApiResponse($response);
+        return $this->handlePdfDownload($response, "debit-note-{$validated['id']}.pdf");
     }
 
     /**

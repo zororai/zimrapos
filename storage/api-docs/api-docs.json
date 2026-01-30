@@ -568,21 +568,51 @@
                                             ],
                                             "properties": {
                                                 "name": {
-                                                    "type": "string"
+                                                    "type": "string",
+                                                    "example": "Corner Bakery"
+                                                },
+                                                "contact_person": {
+                                                    "type": "string",
+                                                    "example": "John Smith"
+                                                },
+                                                "phone": {
+                                                    "type": "string",
+                                                    "example": "0772000001"
                                                 },
                                                 "email": {
                                                     "type": "string",
-                                                    "format": "email"
-                                                },
-                                                "phone": {
-                                                    "type": "string"
+                                                    "format": "email",
+                                                    "example": "john@cornerbakery.com"
                                                 },
                                                 "address": {
+                                                    "type": "string",
+                                                    "example": "123 Road Drive, City, Country"
+                                                },
+                                                "fax": {
+                                                    "type": "string"
+                                                },
+                                                "website": {
+                                                    "type": "string"
+                                                },
+                                                "tax_reg_number": {
+                                                    "type": "string"
+                                                },
+                                                "company_reg_number": {
+                                                    "type": "string"
+                                                },
+                                                "tin_number": {
+                                                    "type": "string"
+                                                },
+                                                "vat_number": {
                                                     "type": "string"
                                                 }
                                             },
                                             "type": "object"
                                         }
+                                    },
+                                    "overwrite_duplicates": {
+                                        "type": "boolean",
+                                        "example": true
                                     }
                                 },
                                 "type": "object"
@@ -1899,6 +1929,92 @@
                                             "required": [
                                                 "id"
                                             ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string",
+                                                    "example": ""
+                                                },
+                                                "customer_id": {
+                                                    "type": "string",
+                                                    "example": ""
+                                                },
+                                                "use_base_currency": {
+                                                    "type": "boolean",
+                                                    "example": false
+                                                },
+                                                "currency_id": {
+                                                    "type": "string",
+                                                    "example": ""
+                                                },
+                                                "products": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "properties": {
+                                                            "id": {
+                                                                "type": "string",
+                                                                "example": ""
+                                                            },
+                                                            "selling_price": {
+                                                                "type": "number",
+                                                                "example": 10.2
+                                                            },
+                                                            "quantity": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            },
+                                                            "discount": {
+                                                                "type": "number",
+                                                                "example": 0
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                },
+                                                "date_format": {
+                                                    "type": "string",
+                                                    "example": "dd/mm/yy"
+                                                },
+                                                "payment_due": {
+                                                    "type": "string",
+                                                    "example": "2025-04-18T15:40:00.546Z"
+                                                },
+                                                "payment_information": {
+                                                    "type": "string",
+                                                    "example": "Please make all payments to our CBZ Bank Account 0100000000"
+                                                },
+                                                "terms_n_conditions": {
+                                                    "type": "string",
+                                                    "example": "This invoice will be considered invalid when the payment due date has lapsed"
+                                                },
+                                                "recipients": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string"
+                                                    },
+                                                    "example": []
+                                                },
+                                                "is_proforma": {
+                                                    "type": "boolean",
+                                                    "example": false
+                                                },
+                                                "template_preference": {
+                                                    "properties": {
+                                                        "template": {
+                                                            "type": "integer",
+                                                            "example": 0
+                                                        },
+                                                        "color": {
+                                                            "type": "string",
+                                                            "example": "no_color"
+                                                        },
+                                                        "table_layout": {
+                                                            "type": "string",
+                                                            "example": "Plain"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                }
+                                            },
                                             "type": "object"
                                         }
                                     }
@@ -1944,6 +2060,20 @@
                                 ],
                                 "properties": {
                                     "data": {
+                                        "properties": {
+                                            "query": {
+                                                "type": "string",
+                                                "example": "*"
+                                            },
+                                            "limit": {
+                                                "type": "integer",
+                                                "example": 10
+                                            },
+                                            "skip": {
+                                                "type": "integer",
+                                                "example": 0
+                                            }
+                                        },
                                         "type": "object"
                                     }
                                 },
@@ -1990,14 +2120,28 @@
                                     "data": {
                                         "properties": {
                                             "invoice_id": {
-                                                "type": "string"
+                                                "type": "string",
+                                                "example": ""
                                             }
                                         },
                                         "type": "object"
                                     },
-                                    "zimra_fiscalize": {
-                                        "type": "boolean",
-                                        "default": false
+                                    "payment_method": {
+                                        "properties": {
+                                            "type": {
+                                                "type": "string",
+                                                "example": "PAYNOW_ECOCASH"
+                                            },
+                                            "phone": {
+                                                "type": "string",
+                                                "example": "0772000001"
+                                            },
+                                            "email": {
+                                                "type": "string",
+                                                "example": "john@cornerbakery.com"
+                                            }
+                                        },
+                                        "type": "object"
                                     }
                                 },
                                 "type": "object"
@@ -2082,6 +2226,12 @@
                                             "required": [
                                                 "id"
                                             ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string",
+                                                    "example": ""
+                                                }
+                                            },
                                             "type": "object"
                                         }
                                     }
@@ -2269,6 +2419,12 @@
                                             "required": [
                                                 "id"
                                             ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string",
+                                                    "example": ""
+                                                }
+                                            },
                                             "type": "object"
                                         }
                                     }
@@ -2456,6 +2612,12 @@
                                             "required": [
                                                 "id"
                                             ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string",
+                                                    "example": ""
+                                                }
+                                            },
                                             "type": "object"
                                         }
                                     }
@@ -2633,6 +2795,12 @@
                                             "required": [
                                                 "id"
                                             ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string",
+                                                    "example": ""
+                                                }
+                                            },
                                             "type": "object"
                                         }
                                     }
@@ -2962,6 +3130,12 @@
                                             "required": [
                                                 "id"
                                             ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string",
+                                                    "example": ""
+                                                }
+                                            },
                                             "type": "object"
                                         }
                                     }
@@ -3058,25 +3232,27 @@
                         "application/json": {
                             "schema": {
                                 "required": [
-                                    "data"
+                                    "data",
+                                    "type"
                                 ],
                                 "properties": {
                                     "data": {
                                         "properties": {
-                                            "transaction_id": {
-                                                "type": "string"
-                                            },
-                                            "transaction_type": {
+                                            "id": {
                                                 "type": "string",
-                                                "enum": [
-                                                    "sale",
-                                                    "invoice",
-                                                    "credit_note",
-                                                    "debit_note"
-                                                ]
+                                                "example": ""
                                             }
                                         },
                                         "type": "object"
+                                    },
+                                    "type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "Invoice",
+                                            "Debit Note",
+                                            "Credit Note"
+                                        ],
+                                        "example": "Invoice"
                                     }
                                 },
                                 "type": "object"

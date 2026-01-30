@@ -55,9 +55,22 @@ class CustomerController extends BaseController
         $validated = $request->validate([
             'data' => 'required|array|min:1|max:1000',
             'data.*.name' => 'required|string',
+            'data.*.email' => 'nullable|string|email',
+            'data.*.phone' => 'nullable|string',
+            'data.*.address' => 'nullable|string',
+            'data.*.contact_person' => 'nullable|string',
+            'data.*.fax' => 'nullable|string',
+            'data.*.website' => 'nullable|string',
+            'data.*.tax_reg_number' => 'nullable|string',
+            'data.*.company_reg_number' => 'nullable|string',
+            'data.*.tin_number' => 'nullable|string',
+            'data.*.vat_number' => 'nullable|string',
+            'overwrite_duplicates' => 'nullable|boolean',
         ]);
 
-        $response = $this->panierApi->createCustomers($validated['data']);
+        $data = array_map(fn($customer) => array_filter($customer, fn($value) => $value !== null), $validated['data']);
+
+        $response = $this->panierApi->createCustomers($data, $validated['overwrite_duplicates'] ?? false);
 
         return $this->handleApiResponse($response);
     }

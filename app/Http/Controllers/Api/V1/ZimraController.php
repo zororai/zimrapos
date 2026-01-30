@@ -69,11 +69,11 @@ class ZimraController extends BaseController
      *     @OA\RequestBody(
      *         required=true,
      *         @OA\JsonContent(
-     *             required={"data"},
+     *             required={"data", "type"},
      *             @OA\Property(property="data", type="object",
-     *                 @OA\Property(property="transaction_id", type="string", description="The ID of the transaction to fiscalize"),
-     *                 @OA\Property(property="transaction_type", type="string", enum={"sale", "invoice", "credit_note", "debit_note"})
-     *             )
+     *                 @OA\Property(property="id", type="string", example="", description="The ID of the transaction to fiscalize")
+     *             ),
+     *             @OA\Property(property="type", type="string", enum={"Invoice", "Debit Note", "Credit Note"}, example="Invoice")
      *         )
      *     ),
      *     @OA\Response(response=200, description="Successfully fiscalized the transaction"),
@@ -89,9 +89,10 @@ class ZimraController extends BaseController
     {
         $validated = $request->validate([
             'data' => 'required|array',
+            'type' => 'required|string|in:Invoice,Debit Note,Credit Note',
         ]);
 
-        $response = $this->panierApi->zimraFiscalize($validated['data']);
+        $response = $this->panierApi->zimraFiscalize($validated['data'], $validated['type']);
         return $this->handleApiResponse($response);
     }
 }

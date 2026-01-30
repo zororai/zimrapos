@@ -83,10 +83,11 @@ class PanierApiService
 
     // ==================== CUSTOMERS ====================
 
-    public function createCustomers(array $data): Response
+    public function createCustomers(array $data, bool $overwriteDuplicates = false): Response
     {
         return $this->client()->post("{$this->baseUrl}/customer/create", [
             'data' => $data,
+            'overwrite_duplicates' => $overwriteDuplicates,
         ]);
     }
 
@@ -490,10 +491,11 @@ class PanierApiService
         return $this->client()->get("{$this->baseUrl}/zimra/close-day");
     }
 
-    public function zimraFiscalize(array $data): Response
+    public function zimraFiscalize(array $data, string $type): Response
     {
         return $this->client()->post("{$this->baseUrl}/zimra/fiscalize", [
             'data' => $data,
+            'type' => $type,
         ]);
     }
 }
