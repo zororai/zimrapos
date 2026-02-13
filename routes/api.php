@@ -136,5 +136,6 @@ Route::prefix('v1')->group(function () {
         Route::get('/open-day', [ZimraController::class, 'openDay']);
         Route::get('/close-day', [ZimraController::class, 'closeDay']);
         Route::post('/fiscalize', [ZimraController::class, 'fiscalize']);
+        Route::get('/fiscalize-status', [ZimraController::class, 'fiscalizeStatus']);
     });
 });

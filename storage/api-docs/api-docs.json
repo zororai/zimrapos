@@ -1,8 +1,8 @@
 {
     "openapi": "3.0.0",
     "info": {
-        "title": "Panier API Integration",
-        "description": "API endpoints for communicating with the Panier API - ZIMRA Fiscalisation Support.\r\n\r\n## Rate Limit\r\n500 API calls every 5 minutes for each unique IP Address.\r\n\r\n## Authentication\r\nRequires APP-ID and API-KEY headers obtained from your Panier company account's Developer API section.\r\n\r\n## ZIMRA Fiscalisation\r\nThis API supports ZIMRA Fiscal Invoices, Credit Notes and Debit Notes based on ZIMRA Fiscal Device Gateway API Specs v7.2.",
+        "title": "API Integration",
+        "description": "API endpoints for ZIMRA Fiscalisation Support.\r\n\r\n## Rate Limit\r\n500 API calls every 5 minutes for each unique IP Address.\r\n\r\n## Authentication\r\nRequires APP-ID and API-KEY headers obtained from your company account's Developer API section.\r\n\r\n## ZIMRA Fiscalisation\r\nThis API supports ZIMRA Fiscal Invoices, Credit Notes and Debit Notes based on ZIMRA Fiscal Device Gateway API Specs v7.2.",
         "contact": {
             "email": "support@example.com"
         },

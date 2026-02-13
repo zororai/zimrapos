@@ -6,14 +6,14 @@ use OpenApi\Attributes as OA;
 
 #[OA\Info(
     version: "1.0.0",
-    title: "Panier API Integration",
-    description: "API endpoints for communicating with the Panier API - ZIMRA Fiscalisation Support.
+    title: "API Integration",
+    description: "API endpoints for ZIMRA Fiscalisation Support.
 
 ## Rate Limit
 500 API calls every 5 minutes for each unique IP Address.
 
 ## Authentication
-Requires APP-ID and API-KEY headers obtained from your Panier company account's Developer API section.
+Requires APP-ID and API-KEY headers obtained from your company account's Developer API section.
 
 ## ZIMRA Fiscalisation
 This API supports ZIMRA Fiscal Invoices, Credit Notes and Debit Notes based on ZIMRA Fiscal Device Gateway API Specs v7.2.",
