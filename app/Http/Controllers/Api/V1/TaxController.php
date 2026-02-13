@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Models\PanierTax;
 use App\Services\DatabaseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -11,6 +12,23 @@ class TaxController extends BaseController
     public function __construct(
         protected DatabaseService $dbService
     ) {}
+
+    /**
+     * @OA\Get(
+     *     path="/api/v1/tax/zimra-types",
+     *     summary="Get available ZIMRA tax types",
+     *     description="Returns the list of available ZIMRA tax types that can be used when creating taxes",
+     *     operationId="getZimraTaxTypes",
+     *     tags={"Taxes"},
+     *     @OA\Response(response=200, description="Successfully retrieved ZIMRA tax types")
+     * )
+     */
+    public function zimraTypes(): JsonResponse
+    {
+        return $this->successResponse([
+            'data' => array_values(PanierTax::ZIMRA_TAX_TYPES),
+        ]);
+    }
 
     /**
      * @OA\Post(
@@ -25,7 +43,8 @@ class TaxController extends BaseController
      *         @OA\JsonContent(
      *             required={"data"},
      *             @OA\Property(property="data", type="array", minItems=1, maxItems=1000,
-     *                 @OA\Items(type="object", required={"name", "percentage"},
+     *                 @OA\Items(type="object",
+     *                     @OA\Property(property="zimra_tax_id", type="integer", description="ZIMRA Tax ID (3=Exempt, 515=Standard, 514=Withholding, 2=Zero)"),
      *                     @OA\Property(property="name", type="string"),
      *                     @OA\Property(property="percentage", type="number", format="float"),
      *                     @OA\Property(property="code", type="string")
@@ -45,11 +64,21 @@ class TaxController extends BaseController
     {
         $validated = $request->validate([
             'data' => 'required|array|min:1|max:1000',
-            'data.*.name' => 'required|string',
-            'data.*.percentage' => 'required|numeric',
+            'data.*.zimra_tax_id' => 'nullable|integer|in:2,3,514,515',
+            'data.*.name' => 'required_without:data.*.zimra_tax_id|string',
+            'data.*.percentage' => 'required_without:data.*.zimra_tax_id|numeric',
+            'data.*.code' => 'nullable|string',
         ]);
 
-        $result = $this->dbService->createTaxes($validated['data']);
+        // Map zimra_tax_id to full tax data if provided
+        $taxData = array_map(function ($tax) {
+            if (isset($tax['zimra_tax_id']) && isset(PanierTax::ZIMRA_TAX_TYPES[$tax['zimra_tax_id']])) {
+                return array_merge(PanierTax::ZIMRA_TAX_TYPES[$tax['zimra_tax_id']], $tax);
+            }
+            return $tax;
+        }, $validated['data']);
+
+        $result = $this->dbService->createTaxes($taxData);
         return $this->successResponse($result, 201);
     }
 

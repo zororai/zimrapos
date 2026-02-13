@@ -58,6 +58,7 @@ Route::prefix('v1')->group(function () {
 
     // Taxes
     Route::prefix('tax')->group(function () {
+        Route::get('/zimra-types', [TaxController::class, 'zimraTypes']);
         Route::post('/create', [TaxController::class, 'create']);
         Route::put('/update', [TaxController::class, 'update']);
         Route::post('/search', [TaxController::class, 'search']);

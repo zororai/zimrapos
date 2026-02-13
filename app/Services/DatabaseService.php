@@ -382,6 +382,7 @@ class DatabaseService
                 'name' => $taxData['name'],
                 'percentage' => $taxData['percentage'] ?? 0,
                 'code' => $taxData['code'] ?? null,
+                'zimra_tax_id' => $taxData['zimra_tax_id'] ?? null,
                 'panier_data' => $taxData,
             ]);
             $created[] = $this->formatTax($tax);
