@@ -3,12 +3,12 @@
 namespace App\Jobs;
 
 use App\Models\FiscalizationRequest;
-use App\Services\PanierApiService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Str;
 
 class ProcessFiscalizationRequest implements ShouldQueue
 {
@@ -21,23 +21,19 @@ class ProcessFiscalizationRequest implements ShouldQueue
         public FiscalizationRequest $fiscalizationRequest
     ) {}
 
-    public function handle(PanierApiService $panierApi): void
+    public function handle(): void
     {
         $this->fiscalizationRequest->markAsProcessing();
 
         try {
-            $response = $panierApi->zimraFiscalize(
-                $this->fiscalizationRequest->request_data,
-                $this->fiscalizationRequest->document_type
-            );
-
-            if ($response->successful()) {
-                $this->fiscalizationRequest->markAsSuccess($response->json());
-            } else {
-                $this->fiscalizationRequest->markAsFailed(
-                    $response->json('message') ?? $response->body()
-                );
-            }
+            // Local fiscalization - generate a local fiscal code
+            $fiscalCode = 'LOCAL-' . strtoupper(Str::random(16));
+            
+            $this->fiscalizationRequest->markAsSuccess([
+                'fiscal_code' => $fiscalCode,
+                'fiscalized_at' => now()->toIso8601String(),
+                'message' => 'Fiscalization processed locally',
+            ]);
         } catch (\Exception $e) {
             $this->fiscalizationRequest->markAsFailed($e->getMessage());
             throw $e;

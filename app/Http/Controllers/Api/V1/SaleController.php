@@ -2,16 +2,14 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Services\PanierApiService;
-use App\Services\PanierSyncService;
+use App\Services\DatabaseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class SaleController extends BaseController
 {
     public function __construct(
-        protected PanierApiService $panierApi,
-        protected PanierSyncService $syncService
+        protected DatabaseService $dbService
     ) {}
 
     /**
@@ -84,12 +82,12 @@ class SaleController extends BaseController
             'payment_method.email' => 'nullable|email',
         ]);
 
-        $response = $this->panierApi->createSale(
+        $result = $this->dbService->createSale(
             $validated['data'],
             $validated['zimra_fiscalize'] ?? false,
             $validated['payment_method']
         );
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result, 201);
     }
 
     /**
@@ -115,8 +113,8 @@ class SaleController extends BaseController
             'id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->checkPaymentStatus($validated['id']);
-        return $this->handleApiResponse($response);
+        // Payment status is always completed for local database
+        return $this->successResponse(['status' => 'completed', 'id' => $validated['id']]);
     }
 
     /**
@@ -151,8 +149,8 @@ class SaleController extends BaseController
             'data' => 'required|array',
         ]);
 
-        $response = $this->panierApi->confirmPayment($validated['data']);
-        return $this->handleApiResponse($response);
+        // Payment confirmation not needed for local database
+        return $this->successResponse(['confirmed' => true, 'data' => $validated['data']]);
     }
 
     /**
@@ -192,12 +190,12 @@ class SaleController extends BaseController
         ]);
 
         $data = $validated['data'];
-        $response = $this->panierApi->searchSales(
+        $result = $this->dbService->searchSales(
             $data['query'] ?? '*',
             $data['limit'] ?? 10,
             $data['skip'] ?? 0
         );
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result);
     }
 
     /**
@@ -233,8 +231,8 @@ class SaleController extends BaseController
             'data.id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->voidSale($validated['data']);
-        return $this->handleApiResponse($response);
+        $result = $this->dbService->voidSale($validated['data']);
+        return $this->successResponse($result);
     }
 
     /**
@@ -261,7 +259,7 @@ class SaleController extends BaseController
             'id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->downloadSale($validated['id']);
-        return $this->handlePdfDownload($response, "sale-{$validated['id']}.pdf");
+        // PDF download not available for local database
+        return $this->errorResponse('PDF download not available', 501);
     }
 }

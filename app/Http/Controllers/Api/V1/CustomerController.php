@@ -2,16 +2,14 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Services\PanierApiService;
-use App\Services\PanierSyncService;
+use App\Services\DatabaseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class CustomerController extends BaseController
 {
     public function __construct(
-        protected PanierApiService $panierApi,
-        protected PanierSyncService $syncService
+        protected DatabaseService $dbService
     ) {}
 
     /**
@@ -70,9 +68,9 @@ class CustomerController extends BaseController
 
         $data = array_map(fn($customer) => array_filter($customer, fn($value) => $value !== null), $validated['data']);
 
-        $response = $this->panierApi->createCustomers($data, $validated['overwrite_duplicates'] ?? false);
+        $result = $this->dbService->createCustomers($data, $validated['overwrite_duplicates'] ?? false);
 
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result, 201);
     }
 
     /**
@@ -119,9 +117,9 @@ class CustomerController extends BaseController
             'data.*.id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->updateCustomers($validated['data']);
+        $result = $this->dbService->updateCustomers($validated['data']);
 
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result);
     }
 
     /**
@@ -163,13 +161,13 @@ class CustomerController extends BaseController
         ]);
 
         $data = $validated['data'];
-        $response = $this->panierApi->searchCustomers(
+        $result = $this->dbService->searchCustomers(
             $data['query'] ?? '*',
             $data['limit'] ?? 10,
             $data['skip'] ?? 0
         );
 
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result);
     }
 
     /**
@@ -212,8 +210,8 @@ class CustomerController extends BaseController
             'data.*.id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->deleteCustomers($validated['data']);
+        $result = $this->dbService->deleteCustomers($validated['data']);
 
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result);
     }
 }

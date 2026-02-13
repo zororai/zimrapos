@@ -2,14 +2,14 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Services\PanierApiService;
+use App\Services\DatabaseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class StockController extends BaseController
 {
     public function __construct(
-        protected PanierApiService $panierApi
+        protected DatabaseService $dbService
     ) {}
 
     /**
@@ -56,9 +56,14 @@ class StockController extends BaseController
             'data.*.suppliers' => 'nullable|string',
         ]);
 
-        $response = $this->panierApi->addStock($validated['data']);
+        // Transform data to use 'id' instead of 'product_id' for DatabaseService
+        $stockData = array_map(fn($item) => [
+            'id' => $item['product_id'],
+            'quantity' => $item['quantity'],
+        ], $validated['data']);
 
-        return $this->handleApiResponse($response);
+        $result = $this->dbService->addStock($stockData);
+        return $this->successResponse($result);
     }
 
     /**
@@ -105,8 +110,13 @@ class StockController extends BaseController
             'data.*.suppliers' => 'nullable|string',
         ]);
 
-        $response = $this->panierApi->subtractStock($validated['data']);
+        // Transform data to use 'id' instead of 'product_id' for DatabaseService
+        $stockData = array_map(fn($item) => [
+            'id' => $item['product_id'],
+            'quantity' => $item['quantity'],
+        ], $validated['data']);
 
-        return $this->handleApiResponse($response);
+        $result = $this->dbService->subtractStock($stockData);
+        return $this->successResponse($result);
     }
 }

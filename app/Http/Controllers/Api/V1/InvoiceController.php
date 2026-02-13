@@ -2,16 +2,14 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Services\PanierApiService;
-use App\Services\PanierSyncService;
+use App\Services\DatabaseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class InvoiceController extends BaseController
 {
     public function __construct(
-        protected PanierApiService $panierApi,
-        protected PanierSyncService $syncService
+        protected DatabaseService $dbService
     ) {}
 
     /**
@@ -86,11 +84,11 @@ class InvoiceController extends BaseController
             'zimra_fiscalize' => 'boolean',
         ]);
 
-        $response = $this->panierApi->createInvoices(
+        $result = $this->dbService->createInvoices(
             $validated['data'],
             $validated['zimra_fiscalize'] ?? false
         );
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result, 201);
     }
 
     /**
@@ -130,8 +128,8 @@ class InvoiceController extends BaseController
             'data.*.id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->updateInvoices($validated['data']);
-        return $this->handleApiResponse($response);
+        $result = $this->dbService->updateInvoices($validated['data']);
+        return $this->successResponse($result);
     }
 
     /**
@@ -171,12 +169,12 @@ class InvoiceController extends BaseController
         ]);
 
         $data = $validated['data'];
-        $response = $this->panierApi->searchInvoices(
+        $result = $this->dbService->searchInvoices(
             $data['query'] ?? '*',
             $data['limit'] ?? 10,
             $data['skip'] ?? 0
         );
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result);
     }
 
     /**
@@ -214,11 +212,11 @@ class InvoiceController extends BaseController
             'zimra_fiscalize' => 'boolean',
         ]);
 
-        $response = $this->panierApi->convertInvoiceToSale(
+        $result = $this->dbService->convertInvoiceToSale(
             $validated['data'],
             $validated['zimra_fiscalize'] ?? false
         );
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result);
     }
 
     /**
@@ -245,8 +243,8 @@ class InvoiceController extends BaseController
             'id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->downloadInvoice($validated['id']);
-        return $this->handlePdfDownload($response, "invoice-{$validated['id']}.pdf");
+        // PDF download not available for local database
+        return $this->errorResponse('PDF download not available', 501);
     }
 
     /**
@@ -283,7 +281,7 @@ class InvoiceController extends BaseController
             'data.*.id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->deleteInvoices($validated['data']);
-        return $this->handleApiResponse($response);
+        $result = $this->dbService->deleteInvoices($validated['data']);
+        return $this->successResponse($result);
     }
 }

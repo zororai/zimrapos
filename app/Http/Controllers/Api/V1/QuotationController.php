@@ -2,16 +2,14 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Services\PanierApiService;
-use App\Services\PanierSyncService;
+use App\Services\DatabaseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class QuotationController extends BaseController
 {
     public function __construct(
-        protected PanierApiService $panierApi,
-        protected PanierSyncService $syncService
+        protected DatabaseService $dbService
     ) {}
 
     /**
@@ -57,8 +55,8 @@ class QuotationController extends BaseController
             'data' => 'required|array|min:1|max:50',
         ]);
 
-        $response = $this->panierApi->createQuotations($validated['data']);
-        return $this->handleApiResponse($response);
+        $result = $this->dbService->createQuotations($validated['data']);
+        return $this->successResponse($result, 201);
     }
 
     /**
@@ -98,8 +96,8 @@ class QuotationController extends BaseController
             'data.*.id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->updateQuotations($validated['data']);
-        return $this->handleApiResponse($response);
+        $result = $this->dbService->updateQuotations($validated['data']);
+        return $this->successResponse($result);
     }
 
     /**
@@ -139,12 +137,12 @@ class QuotationController extends BaseController
         ]);
 
         $data = $validated['data'];
-        $response = $this->panierApi->searchQuotations(
+        $result = $this->dbService->searchQuotations(
             $data['query'] ?? '*',
             $data['limit'] ?? 10,
             $data['skip'] ?? 0
         );
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result);
     }
 
     /**
@@ -179,8 +177,8 @@ class QuotationController extends BaseController
             'data.quotation_id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->convertQuotationToInvoice($validated['data']);
-        return $this->handleApiResponse($response);
+        $result = $this->dbService->convertQuotationToInvoice($validated['data']);
+        return $this->successResponse($result);
     }
 
     /**
@@ -218,11 +216,11 @@ class QuotationController extends BaseController
             'zimra_fiscalize' => 'boolean',
         ]);
 
-        $response = $this->panierApi->convertQuotationToSale(
+        $result = $this->dbService->convertQuotationToSale(
             $validated['data'],
             $validated['zimra_fiscalize'] ?? false
         );
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result);
     }
 
     /**
@@ -249,8 +247,8 @@ class QuotationController extends BaseController
             'id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->downloadQuotation($validated['id']);
-        return $this->handlePdfDownload($response, "quotation-{$validated['id']}.pdf");
+        // PDF download not available for local database
+        return $this->errorResponse('PDF download not available', 501);
     }
 
     /**
@@ -287,7 +285,7 @@ class QuotationController extends BaseController
             'data.*.id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->deleteQuotations($validated['data']);
-        return $this->handleApiResponse($response);
+        $result = $this->dbService->deleteQuotations($validated['data']);
+        return $this->successResponse($result);
     }
 }

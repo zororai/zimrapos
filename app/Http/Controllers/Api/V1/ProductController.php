@@ -2,16 +2,14 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Services\PanierApiService;
-use App\Services\PanierSyncService;
+use App\Services\DatabaseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class ProductController extends BaseController
 {
     public function __construct(
-        protected PanierApiService $panierApi,
-        protected PanierSyncService $syncService
+        protected DatabaseService $dbService
     ) {}
 
     /**
@@ -117,16 +115,12 @@ class ProductController extends BaseController
             return $data;
         }, $validated['data']);
 
-        $response = $this->panierApi->createProducts(
+        $result = $this->dbService->createProducts(
             $productData,
             $validated['overwrite_duplicates'] ?? true
         );
 
-        if ($response->successful()) {
-            $this->syncService->syncProducts($response->json());
-        }
-
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result, 201);
     }
 
     /**
@@ -185,13 +179,9 @@ class ProductController extends BaseController
             'data.*.id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->updateProducts($validated['data']);
+        $result = $this->dbService->updateProducts($validated['data']);
 
-        if ($response->successful()) {
-            $this->syncService->syncProducts($response->json());
-        }
-
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result);
     }
 
     /**
@@ -241,17 +231,13 @@ class ProductController extends BaseController
         ]);
 
         $data = $validated['data'];
-        $response = $this->panierApi->searchProducts(
+        $result = $this->dbService->searchProducts(
             $data['query'] ?? '*',
             $data['limit'] ?? 10,
             $data['skip'] ?? 0
         );
 
-        if ($response->successful()) {
-            $this->syncService->syncProductsFromSearch($response->json());
-        }
-
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result);
     }
 
     /**
@@ -300,13 +286,8 @@ class ProductController extends BaseController
             'data.*.id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->deleteProducts($validated['data']);
+        $result = $this->dbService->deleteProducts($validated['data']);
 
-        if ($response->successful()) {
-            $ids = array_column($validated['data'], 'id');
-            $this->syncService->deleteProducts($ids);
-        }
-
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result);
     }
 }

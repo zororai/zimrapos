@@ -2,16 +2,14 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Services\PanierApiService;
-use App\Services\PanierSyncService;
+use App\Services\DatabaseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class SupplierController extends BaseController
 {
     public function __construct(
-        protected PanierApiService $panierApi,
-        protected PanierSyncService $syncService
+        protected DatabaseService $dbService
     ) {}
 
     /**
@@ -51,8 +49,8 @@ class SupplierController extends BaseController
             'data.*.name' => 'required|string',
         ]);
 
-        $response = $this->panierApi->createSuppliers($validated['data']);
-        return $this->handleApiResponse($response);
+        $result = $this->dbService->createSuppliers($validated['data']);
+        return $this->successResponse($result, 201);
     }
 
     /**
@@ -93,8 +91,8 @@ class SupplierController extends BaseController
             'data.*.id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->updateSuppliers($validated['data']);
-        return $this->handleApiResponse($response);
+        $result = $this->dbService->updateSuppliers($validated['data']);
+        return $this->successResponse($result);
     }
 
     /**
@@ -134,12 +132,12 @@ class SupplierController extends BaseController
         ]);
 
         $data = $validated['data'];
-        $response = $this->panierApi->searchSuppliers(
+        $result = $this->dbService->searchSuppliers(
             $data['query'] ?? '*',
             $data['limit'] ?? 10,
             $data['skip'] ?? 0
         );
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result);
     }
 
     /**
@@ -176,7 +174,7 @@ class SupplierController extends BaseController
             'data.*.id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->deleteSuppliers($validated['data']);
-        return $this->handleApiResponse($response);
+        $result = $this->dbService->deleteSuppliers($validated['data']);
+        return $this->successResponse($result);
     }
 }

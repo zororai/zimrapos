@@ -2,16 +2,14 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Services\PanierApiService;
-use App\Services\PanierSyncService;
+use App\Services\DatabaseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class CurrencyController extends BaseController
 {
     public function __construct(
-        protected PanierApiService $panierApi,
-        protected PanierSyncService $syncService
+        protected DatabaseService $dbService
     ) {}
 
     /**
@@ -52,11 +50,11 @@ class CurrencyController extends BaseController
             'overwrite_duplicates' => 'nullable|boolean',
         ]);
 
-        $response = $this->panierApi->createCurrencies(
+        $result = $this->dbService->createCurrencies(
             $validated['data'],
             $validated['overwrite_duplicates'] ?? false
         );
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result, 201);
     }
 
     /**
@@ -94,8 +92,8 @@ class CurrencyController extends BaseController
             'data.*.id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->updateCurrencies($validated['data']);
-        return $this->handleApiResponse($response);
+        $result = $this->dbService->updateCurrencies($validated['data']);
+        return $this->successResponse($result);
     }
 
     /**
@@ -135,12 +133,12 @@ class CurrencyController extends BaseController
         ]);
 
         $data = $validated['data'];
-        $response = $this->panierApi->searchCurrencies(
+        $result = $this->dbService->searchCurrencies(
             $data['query'] ?? '*',
             $data['limit'] ?? 10,
             $data['skip'] ?? 0
         );
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result);
     }
 
     /**
@@ -177,7 +175,7 @@ class CurrencyController extends BaseController
             'data.*.id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->deleteCurrencies($validated['data']);
-        return $this->handleApiResponse($response);
+        $result = $this->dbService->deleteCurrencies($validated['data']);
+        return $this->successResponse($result);
     }
 }

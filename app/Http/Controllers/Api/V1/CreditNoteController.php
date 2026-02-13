@@ -2,16 +2,14 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Services\PanierApiService;
-use App\Services\PanierSyncService;
+use App\Services\DatabaseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class CreditNoteController extends BaseController
 {
     public function __construct(
-        protected PanierApiService $panierApi,
-        protected PanierSyncService $syncService
+        protected DatabaseService $dbService
     ) {}
 
     /**
@@ -60,11 +58,11 @@ class CreditNoteController extends BaseController
             'zimra_fiscalize' => 'boolean',
         ]);
 
-        $response = $this->panierApi->createCreditNotes(
+        $result = $this->dbService->createCreditNotes(
             $validated['data'],
             $validated['zimra_fiscalize'] ?? false
         );
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result, 201);
     }
 
     /**
@@ -104,12 +102,12 @@ class CreditNoteController extends BaseController
         ]);
 
         $data = $validated['data'];
-        $response = $this->panierApi->searchCreditNotes(
+        $result = $this->dbService->searchCreditNotes(
             $data['query'] ?? '*',
             $data['limit'] ?? 10,
             $data['skip'] ?? 0
         );
-        return $this->handleApiResponse($response);
+        return $this->successResponse($result);
     }
 
     /**
@@ -136,8 +134,8 @@ class CreditNoteController extends BaseController
             'id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->downloadCreditNote($validated['id']);
-        return $this->handlePdfDownload($response, "credit-note-{$validated['id']}.pdf");
+        // PDF download not available for local database
+        return $this->errorResponse('PDF download not available', 501);
     }
 
     /**
@@ -174,7 +172,7 @@ class CreditNoteController extends BaseController
             'data.*.id' => 'required|string',
         ]);
 
-        $response = $this->panierApi->deleteCreditNotes($validated['data']);
-        return $this->handleApiResponse($response);
+        $result = $this->dbService->deleteCreditNotes($validated['data']);
+        return $this->successResponse($result);
     }
 }
