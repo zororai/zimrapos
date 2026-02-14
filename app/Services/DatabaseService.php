@@ -121,21 +121,45 @@ class DatabaseService
 
     protected function formatProduct(PanierProduct $product): array
     {
+        // Get the tax relationship
+        $tax = $product->tax;
+        $applicableTax = null;
+        if ($tax) {
+            $applicableTax = [
+                'id' => $tax->panier_id,
+                'name' => $tax->name,
+                'percentage' => (float) $tax->percentage,
+                'code' => $tax->code,
+                'zimra_tax_id' => $tax->zimra_tax_id,
+            ];
+        }
+
+        // Get suppliers as objects
+        $supplierObjects = [];
+        if ($product->suppliers && is_array($product->suppliers)) {
+            $suppliers = PanierSupplier::whereIn('panier_id', $product->suppliers)->get();
+            foreach ($suppliers as $supplier) {
+                $supplierObjects[] = [
+                    'id' => $supplier->panier_id,
+                    'name' => $supplier->name,
+                ];
+            }
+        }
+
         return [
             'id' => $product->panier_id,
-            '_id' => $product->panier_id,
             'name' => $product->name,
             'description' => $product->description,
             'buying_price' => (float) $product->buying_price,
+            'sku' => $product->sku,
+            'hs_code' => $product->hs_code,
             'selling_price' => (float) $product->selling_price,
             'quantity' => $product->quantity,
-            'hs_code' => $product->hs_code,
-            'sku' => $product->sku,
             'is_inventory_item' => $product->is_inventory_item,
-            'applicable_tax_id' => $product->applicable_tax_id,
-            'suppliers' => $product->suppliers,
-            'created_at' => $product->created_at?->toIso8601String(),
+            'applicable_tax' => $applicableTax,
+            'supplier' => $supplierObjects,
             'updated_at' => $product->updated_at?->toIso8601String(),
+            'created_at' => $product->created_at?->toIso8601String(),
         ];
     }
 

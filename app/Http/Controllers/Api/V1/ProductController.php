@@ -80,15 +80,9 @@ class ProductController extends BaseController
             'overwrite_duplicates' => 'boolean',
         ]);
 
-        // CUID validation pattern
-        $isValidCuid = function($value) {
-            return is_string($value) && !empty($value) && preg_match('/^[cC][^\s-]{8,}$/', $value);
-        };
-
         // Ensure all required fields are present with defaults
-        $productData = array_map(function ($product) use ($isValidCuid) {
-            // Start with only the fields we want to send
-            $data = [
+        $productData = array_map(function ($product) {
+            return [
                 'name' => $product['name'],
                 'description' => $product['description'] ?? '',
                 'buying_price' => $product['buying_price'] ?? 0,
@@ -97,22 +91,9 @@ class ProductController extends BaseController
                 'hs_code' => $product['hs_code'] ?? '',
                 'sku' => $product['sku'] ?? '',
                 'is_inventory_item' => $product['is_inventory_item'] ?? true,
+                'applicable_tax_id' => $product['applicable_tax_id'] ?? null,
+                'suppliers' => $product['suppliers'] ?? null,
             ];
-            
-            // Only include applicable_tax_id if it's a valid CUID
-            if (isset($product['applicable_tax_id']) && $isValidCuid($product['applicable_tax_id'])) {
-                $data['applicable_tax_id'] = $product['applicable_tax_id'];
-            }
-            
-            // Only include suppliers if it's an array with valid CUIDs
-            if (isset($product['suppliers']) && is_array($product['suppliers'])) {
-                $validSuppliers = array_values(array_filter($product['suppliers'], $isValidCuid));
-                if (!empty($validSuppliers)) {
-                    $data['suppliers'] = $validSuppliers;
-                }
-            }
-            
-            return $data;
         }, $validated['data']);
 
         $result = $this->dbService->createProducts(
