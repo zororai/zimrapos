@@ -383,19 +383,11 @@ class ZimraDeviceService
         $fiscalDayNo = $fiscalDayNo ?? FiscalDay::getNextFiscalDayNo($deviceId);
 
         $baseUrl = $zimraConfig->base_url;
-
-        // Write certificates from database to files for mTLS
-        if ($zimraConfig->certificate && $zimraConfig->private_key) {
-            Storage::put('zimra/device_certificate.pem', $zimraConfig->certificate);
-            Storage::put('zimra/device_private.key', $zimraConfig->private_key);
-        }
+        $mtls = $this->prepareMtlsCertificates($zimraConfig);
 
         $openedAt = now();
 
-        $response = Http::withOptions([
-            'cert' => storage_path('app/zimra/device_certificate.pem'),
-            'ssl_key' => storage_path('app/zimra/device_private.key'),
-        ])->withHeaders([
+        $response = Http::withOptions($mtls)->withHeaders([
             'DeviceModelName' => $zimraConfig->device_model,
             'DeviceModelVersion' => $zimraConfig->device_version,
             'Accept' => 'application/json',
@@ -450,7 +442,7 @@ class ZimraDeviceService
 
     /*
     |--------------------------------------------------------------------------
-    | Get Current Open Fiscal Day
+    | Get Current Open Fiscal Day (with ZIMRA sync)
     |--------------------------------------------------------------------------
     */
     public function getCurrentFiscalDay(): ?FiscalDay
@@ -460,7 +452,52 @@ class ZimraDeviceService
             return null;
         }
 
-        return FiscalDay::getCurrentOpen($zimraConfig->device_id);
+        $deviceId = $zimraConfig->device_id;
+
+        // First check local database
+        $localFiscalDay = FiscalDay::getCurrentOpen($deviceId);
+        if ($localFiscalDay) {
+            return $localFiscalDay;
+        }
+
+        // If no local record, check ZIMRA status and sync if needed
+        try {
+            Log::info('Checking ZIMRA status for fiscal day sync', ['device_id' => $deviceId]);
+            $status = $this->getStatus($deviceId);
+            Log::info('ZIMRA GetStatus response', ['status' => $status]);
+            
+            // Check if there's an error in the response
+            if (isset($status['error']) && $status['error']) {
+                Log::warning('ZIMRA GetStatus returned error', ['error' => $status]);
+                return null;
+            }
+            
+            if (isset($status['fiscalDayStatus']) && $status['fiscalDayStatus'] === 'FiscalDayOpened') {
+                // ZIMRA says day is open but we don't have a local record - create one
+                $fiscalDayNo = $status['lastFiscalDayNo'] ?? 1;
+                
+                Log::info('Creating local fiscal day from ZIMRA sync', ['fiscal_day_no' => $fiscalDayNo, 'device_id' => $deviceId]);
+                
+                $fiscalDay = FiscalDay::create([
+                    'fiscal_day_no' => $fiscalDayNo,
+                    'device_id' => $deviceId,
+                    'status' => 'open',
+                    'opened_at' => now(),
+                    'receipt_counter' => 0,
+                    'fiscal_counters' => [],
+                ]);
+                
+                Log::info('Local fiscal day created', ['id' => $fiscalDay->id]);
+                
+                return $fiscalDay;
+            } else {
+                Log::info('ZIMRA fiscal day status is not FiscalDayOpened', ['status' => $status['fiscalDayStatus'] ?? 'unknown']);
+            }
+        } catch (\Exception $e) {
+            Log::error('Failed to sync fiscal day from ZIMRA', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+        }
+
+        return null;
     }
 
     /*
@@ -486,16 +523,14 @@ class ZimraDeviceService
 
         $baseUrl = $zimraConfig->base_url;
 
-        // Write certificates from database to files for mTLS
-        if ($zimraConfig->certificate && $zimraConfig->private_key) {
-            Storage::put('zimra/device_certificate.pem', $zimraConfig->certificate);
-            Storage::put('zimra/device_private.key', $zimraConfig->private_key);
+        try {
+            $mtls = $this->prepareMtlsCertificates($zimraConfig);
+        } catch (\Exception $e) {
+            Log::error('ZIMRA Ping Failed: ' . $e->getMessage());
+            return false;
         }
 
-        $response = Http::withOptions([
-            'cert' => storage_path('app/zimra/device_certificate.pem'),
-            'ssl_key' => storage_path('app/zimra/device_private.key'),
-        ])->withHeaders([
+        $response = Http::withOptions($mtls)->withHeaders([
             'DeviceModelName' => $zimraConfig->device_model,
             'DeviceModelVersion' => $zimraConfig->device_version,
             'Accept' => 'application/json',

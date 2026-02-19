@@ -475,8 +475,15 @@
                                         </select>
                                     </div>
                                     <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Tax Rate (%)</label>
-                                        <input type="number" x-model.number="receiptForm.taxPercent" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" value="15" min="0" max="100">
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">VAT Tax Code</label>
+                                        <select x-model="receiptForm.taxCode" @change="updateTaxPercent()" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                                            <option value="A">A - Standard Rated (15%)</option>
+                                            <option value="B">B - Zero Rated (0%)</option>
+                                            <option value="C">C - Exempt (0%)</option>
+                                            <option value="D">D - Withholding VAT (15%)</option>
+                                            <option value="E">E - Deemed Supplies</option>
+                                        </select>
+                                        <p class="text-xs text-gray-500 mt-1" x-text="getTaxCodeDescription()"></p>
                                     </div>
                                 </div>
 
@@ -603,6 +610,7 @@
                         { receiptLineName: '', receiptLineQuantity: 1, receiptLinePrice: 0, receiptLineHSCode: '' }
                     ],
                     paymentMethod: 'Cash',
+                    taxCode: 'A',
                     taxPercent: 15
                 },
 
@@ -792,15 +800,20 @@
                         });
                         
                         const data = await res.json();
+                        console.log('Open fiscal day response:', data);
                         
                         if (res.ok && !data.error) {
                             this.showMessage('Fiscal day opened successfully!', 'success');
                             await this.loadFiscalDay();
                         } else {
-                            this.showMessage(data.error || data.message || 'Failed to open fiscal day', 'error');
+                            // Show detailed error
+                            const errorMsg = data.body?.detail || data.error || data.message || JSON.stringify(data);
+                            this.showMessage('Failed: ' + errorMsg, 'error');
+                            console.error('Open day error:', data);
                         }
                     } catch (e) {
-                        this.showMessage('An error occurred', 'error');
+                        this.showMessage('An error occurred: ' + e.message, 'error');
+                        console.error('Open day exception:', e);
                     }
                     this.loading = false;
                 },
@@ -834,6 +847,33 @@
                     return this.receiptForm.receiptLines.reduce((sum, line) => {
                         return sum + (line.receiptLineQuantity * line.receiptLinePrice);
                     }, 0);
+                },
+                
+                updateTaxPercent() {
+                    const taxRates = {
+                        'A': 15,  // Standard Rated
+                        'B': 0,   // Zero Rated
+                        'C': 0,   // Exempt
+                        'D': 15,  // Withholding VAT
+                        'E': 0    // Deemed Supplies (varies, default 0)
+                    };
+                    this.receiptForm.taxPercent = taxRates[this.receiptForm.taxCode] || 15;
+                },
+                
+                getTaxCodeDescription() {
+                    const descriptions = {
+                        'A': 'Standard VAT - General goods, retail sales, services',
+                        'B': 'Zero Rated - Exports, basic food items, approved supplies',
+                        'C': 'VAT Exempt - Financial, educational, medical services',
+                        'D': 'Withholding VAT - Customer is VAT withholding agent',
+                        'E': 'Deemed Supplies - Special tax scenarios'
+                    };
+                    return descriptions[this.receiptForm.taxCode] || '';
+                },
+                
+                getTaxID() {
+                    const taxIDs = { 'A': 1, 'B': 2, 'C': 3, 'D': 4, 'E': 5 };
+                    return taxIDs[this.receiptForm.taxCode] || 1;
                 },
                 
                 addReceiptLine() {
@@ -872,14 +912,14 @@
                                 receiptLinePrice: line.receiptLinePrice,
                                 receiptLineQuantity: line.receiptLineQuantity,
                                 receiptLineTotal: line.receiptLineQuantity * line.receiptLinePrice,
-                                taxCode: 'A',
+                                taxCode: this.receiptForm.taxCode,
                                 taxPercent: this.receiptForm.taxPercent,
-                                taxID: 1
+                                taxID: this.getTaxID()
                             })),
                             receiptTaxes: [{
-                                taxCode: 'A',
+                                taxCode: this.receiptForm.taxCode,
                                 taxPercent: this.receiptForm.taxPercent,
-                                taxID: 1,
+                                taxID: this.getTaxID(),
                                 taxAmount: taxAmount,
                                 salesAmountWithTax: total
                             }],

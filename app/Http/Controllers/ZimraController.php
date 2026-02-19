@@ -233,6 +233,14 @@ class ZimraController extends Controller
             $config = \App\Models\ZimraConfig::getActive();
             $allOpenDays = \App\Models\FiscalDay::where('status', 'open')->get();
             
+            // Also get ZIMRA status directly for debugging
+            $zimraStatus = null;
+            try {
+                $zimraStatus = $zimra->getStatus();
+            } catch (\Exception $e) {
+                $zimraStatus = ['error' => $e->getMessage()];
+            }
+            
             $fiscalDay = $zimra->getCurrentFiscalDay();
 
             if (!$fiscalDay) {
@@ -241,7 +249,8 @@ class ZimraController extends Controller
                     'message' => 'No open fiscal day',
                     'debug' => [
                         'config_device_id' => $config?->device_id,
-                        'all_open_days' => $allOpenDays->toArray()
+                        'all_open_days' => $allOpenDays->toArray(),
+                        'zimra_status' => $zimraStatus
                     ]
                 ]);
             }
