@@ -3447,7 +3447,7 @@
                             "schema": {
                                 "properties": {
                                     "fiscal_day_no": {
-                                        "description": "Fiscal day number (first day = 1, increments daily)",
+                                        "description": "Fiscal day number (auto-increments if not provided)",
                                         "type": "integer",
                                         "example": 1
                                     }
@@ -3464,10 +3464,338 @@
                             "application/json": {
                                 "schema": {
                                     "properties": {
-                                        "operationID": {
-                                            "type": "string"
+                                        "success": {
+                                            "type": "boolean"
                                         },
-                                        "fiscalDayNo": {
+                                        "data": {
+                                            "type": "object"
+                                        },
+                                        "fiscal_day": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Error opening fiscal day or day already open"
+                    }
+                },
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/zimra/close-day": {
+            "post": {
+                "tags": [
+                    "ZIMRA Fiscalisation"
+                ],
+                "summary": "Close ZIMRA fiscal day",
+                "description": "Close the current open fiscal day. Sends accumulated fiscal counters to ZIMRA. Auto-closes at 11 PM if not manually closed.",
+                "operationId": "c55c0e71bc19351bd0172c79198e6f7c",
+                "requestBody": {
+                    "required": false,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "fiscalDayNo": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "fiscalDayCounters": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "receiptCounter": {
+                                        "type": "integer",
+                                        "example": 5
+                                    },
+                                    "fiscalDayDeviceSignature": {
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Fiscal day closed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        },
+                                        "fiscal_day": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Error closing fiscal day or no open day"
+                    }
+                },
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/zimra/fiscal-day": {
+            "get": {
+                "tags": [
+                    "ZIMRA Fiscalisation"
+                ],
+                "summary": "Get current fiscal day status",
+                "description": "Check if a fiscal day is currently open and get its details",
+                "operationId": "89178a9aba62cd9106e8f106c7bff6c7",
+                "responses": {
+                    "200": {
+                        "description": "Fiscal day status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "is_open": {
+                                            "type": "boolean"
+                                        },
+                                        "fiscal_day": {
+                                            "type": "object",
+                                            "nullable": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/zimra/submit-receipt": {
+            "post": {
+                "tags": [
+                    "ZIMRA Fiscalisation"
+                ],
+                "summary": "Submit fiscal receipt to ZIMRA",
+                "description": "Submit a fiscal receipt with automatic SHA256 hashing and ECDSA signing. Requires an open fiscal day.",
+                "operationId": "04b812e9ad1046dcba1b86c1cb0bf1d2",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "receiptType",
+                                    "receiptCurrency",
+                                    "receiptCounter",
+                                    "receiptGlobalNo",
+                                    "receiptDate",
+                                    "receiptLines",
+                                    "receiptTaxes",
+                                    "receiptPayments",
+                                    "receiptTotal"
+                                ],
+                                "properties": {
+                                    "receiptType": {
+                                        "type": "string",
+                                        "enum": [
+                                            "FiscalInvoice",
+                                            "CreditNote",
+                                            "DebitNote"
+                                        ],
+                                        "example": "FiscalInvoice"
+                                    },
+                                    "receiptCurrency": {
+                                        "type": "string",
+                                        "example": "USD"
+                                    },
+                                    "receiptCounter": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "receiptGlobalNo": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "invoiceNo": {
+                                        "type": "string",
+                                        "example": "INV-001"
+                                    },
+                                    "receiptDate": {
+                                        "type": "string",
+                                        "format": "date-time",
+                                        "example": "2026-02-19T12:00:00"
+                                    },
+                                    "receiptLinesTaxInclusive": {
+                                        "type": "boolean",
+                                        "example": true
+                                    },
+                                    "receiptLines": {
+                                        "type": "array",
+                                        "items": {
+                                            "properties": {
+                                                "receiptLineType": {
+                                                    "type": "string",
+                                                    "example": "Sale"
+                                                },
+                                                "receiptLineNo": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "receiptLineHSCode": {
+                                                    "type": "string",
+                                                    "example": "85456852"
+                                                },
+                                                "receiptLineName": {
+                                                    "type": "string",
+                                                    "example": "Product"
+                                                },
+                                                "receiptLinePrice": {
+                                                    "type": "number",
+                                                    "example": 25
+                                                },
+                                                "receiptLineQuantity": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "receiptLineTotal": {
+                                                    "type": "number",
+                                                    "example": 25
+                                                },
+                                                "taxCode": {
+                                                    "type": "string",
+                                                    "example": "A"
+                                                },
+                                                "taxPercent": {
+                                                    "type": "number",
+                                                    "example": 15
+                                                },
+                                                "taxID": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "receiptTaxes": {
+                                        "type": "array",
+                                        "items": {
+                                            "properties": {
+                                                "taxCode": {
+                                                    "type": "string",
+                                                    "example": "A"
+                                                },
+                                                "taxPercent": {
+                                                    "type": "number",
+                                                    "example": 15
+                                                },
+                                                "taxID": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "taxAmount": {
+                                                    "type": "number",
+                                                    "example": 3.75
+                                                },
+                                                "salesAmountWithTax": {
+                                                    "type": "number",
+                                                    "example": 28.75
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "receiptPayments": {
+                                        "type": "array",
+                                        "items": {
+                                            "properties": {
+                                                "moneyTypeCode": {
+                                                    "type": "string",
+                                                    "example": "Cash"
+                                                },
+                                                "paymentAmount": {
+                                                    "type": "number",
+                                                    "example": 28.75
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "receiptTotal": {
+                                        "type": "number",
+                                        "example": 28.75
+                                    },
+                                    "receiptPrintForm": {
+                                        "type": "string",
+                                        "example": "Receipt48"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Receipt submitted",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "receiptID": {
+                                                    "type": "integer"
+                                                },
+                                                "serverDate": {
+                                                    "type": "string"
+                                                },
+                                                "receiptServerSignature": {
+                                                    "type": "object"
+                                                },
+                                                "operationID": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "type": "object"
+                                        },
+                                        "fiscal_day_no": {
                                             "type": "integer"
                                         }
                                     },
@@ -3477,7 +3805,109 @@
                         }
                     },
                     "400": {
-                        "description": "Error opening fiscal day"
+                        "description": "Error submitting receipt or no open fiscal day"
+                    }
+                },
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/zimra/submit-file": {
+            "post": {
+                "tags": [
+                    "ZIMRA Fiscalisation"
+                ],
+                "summary": "Submit fiscal file to ZIMRA",
+                "description": "Submit a fiscal day file to ZIMRA. Used after closing a fiscal day. Content-Type is text/plain.",
+                "operationId": "ee340a28e4661f99ee5e48dcd292a6f4",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "header",
+                                    "content",
+                                    "footer"
+                                ],
+                                "properties": {
+                                    "header": {
+                                        "properties": {
+                                            "fiscalDayNo": {
+                                                "type": "integer",
+                                                "example": 1
+                                            },
+                                            "fiscalDayOpened": {
+                                                "type": "string",
+                                                "format": "date-time",
+                                                "example": "2026-02-19T08:00:00"
+                                            },
+                                            "fileSequence": {
+                                                "type": "integer",
+                                                "example": 1
+                                            }
+                                        },
+                                        "type": "object"
+                                    },
+                                    "content": {
+                                        "properties": {
+                                            "receipts": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object"
+                                                }
+                                            }
+                                        },
+                                        "type": "object"
+                                    },
+                                    "footer": {
+                                        "properties": {
+                                            "fiscalDayCounters": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object"
+                                                }
+                                            },
+                                            "receiptCounter": {
+                                                "type": "integer",
+                                                "example": 0
+                                            },
+                                            "fiscalDayClosed": {
+                                                "type": "string",
+                                                "format": "date-time",
+                                                "example": "2026-02-19T22:00:00"
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "File submitted",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "operationID": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Error submitting file"
                     }
                 },
                 "servers": [

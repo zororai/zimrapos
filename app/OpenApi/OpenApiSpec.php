@@ -464,13 +464,94 @@ This API supports ZIMRA Fiscal Invoices, Credit Notes and Debit Notes based on Z
         required: false,
         content: new OA\JsonContent(
             properties: [
-                new OA\Property(property: "fiscal_day_no", type: "integer", example: 1, description: "Fiscal day number (first day = 1, increments daily)")
+                new OA\Property(property: "fiscal_day_no", type: "integer", example: 1, description: "Fiscal day number (auto-increments if not provided)")
             ]
         )
     ),
     responses: [
-        new OA\Response(response: 200, description: "Fiscal day opened", content: new OA\JsonContent(properties: [new OA\Property(property: "operationID", type: "string"), new OA\Property(property: "fiscalDayNo", type: "integer")])),
-        new OA\Response(response: 400, description: "Error opening fiscal day")
+        new OA\Response(response: 200, description: "Fiscal day opened", content: new OA\JsonContent(properties: [new OA\Property(property: "success", type: "boolean"), new OA\Property(property: "data", type: "object"), new OA\Property(property: "fiscal_day", type: "object")])),
+        new OA\Response(response: 400, description: "Error opening fiscal day or day already open")
+    ]
+)]
+#[OA\Post(
+    path: "/zimra/close-day",
+    summary: "Close ZIMRA fiscal day",
+    description: "Close the current open fiscal day. Sends accumulated fiscal counters to ZIMRA. Auto-closes at 11 PM if not manually closed.",
+    tags: ["ZIMRA Fiscalisation"],
+    requestBody: new OA\RequestBody(
+        required: false,
+        content: new OA\JsonContent(
+            properties: [
+                new OA\Property(property: "fiscalDayNo", type: "integer", example: 1),
+                new OA\Property(property: "fiscalDayCounters", type: "array", items: new OA\Items(type: "object")),
+                new OA\Property(property: "receiptCounter", type: "integer", example: 5),
+                new OA\Property(property: "fiscalDayDeviceSignature", type: "object")
+            ]
+        )
+    ),
+    responses: [
+        new OA\Response(response: 200, description: "Fiscal day closed", content: new OA\JsonContent(properties: [new OA\Property(property: "success", type: "boolean"), new OA\Property(property: "data", type: "object"), new OA\Property(property: "fiscal_day", type: "object")])),
+        new OA\Response(response: 400, description: "Error closing fiscal day or no open day")
+    ]
+)]
+#[OA\Get(
+    path: "/zimra/fiscal-day",
+    summary: "Get current fiscal day status",
+    description: "Check if a fiscal day is currently open and get its details",
+    tags: ["ZIMRA Fiscalisation"],
+    responses: [
+        new OA\Response(response: 200, description: "Fiscal day status", content: new OA\JsonContent(properties: [new OA\Property(property: "is_open", type: "boolean"), new OA\Property(property: "fiscal_day", type: "object", nullable: true), new OA\Property(property: "message", type: "string", nullable: true)]))
+    ]
+)]
+#[OA\Post(
+    path: "/zimra/submit-receipt",
+    summary: "Submit fiscal receipt to ZIMRA",
+    description: "Submit a fiscal receipt with automatic SHA256 hashing and ECDSA signing. Requires an open fiscal day.",
+    tags: ["ZIMRA Fiscalisation"],
+    requestBody: new OA\RequestBody(
+        required: true,
+        content: new OA\JsonContent(
+            required: ["receiptType", "receiptCurrency", "receiptCounter", "receiptGlobalNo", "receiptDate", "receiptLines", "receiptTaxes", "receiptPayments", "receiptTotal"],
+            properties: [
+                new OA\Property(property: "receiptType", type: "string", enum: ["FiscalInvoice", "CreditNote", "DebitNote"], example: "FiscalInvoice"),
+                new OA\Property(property: "receiptCurrency", type: "string", example: "USD"),
+                new OA\Property(property: "receiptCounter", type: "integer", example: 1),
+                new OA\Property(property: "receiptGlobalNo", type: "integer", example: 1),
+                new OA\Property(property: "invoiceNo", type: "string", example: "INV-001"),
+                new OA\Property(property: "receiptDate", type: "string", format: "date-time", example: "2026-02-19T12:00:00"),
+                new OA\Property(property: "receiptLinesTaxInclusive", type: "boolean", example: true),
+                new OA\Property(property: "receiptLines", type: "array", items: new OA\Items(type: "object", properties: [new OA\Property(property: "receiptLineType", type: "string", example: "Sale"), new OA\Property(property: "receiptLineNo", type: "integer", example: 1), new OA\Property(property: "receiptLineHSCode", type: "string", example: "85456852"), new OA\Property(property: "receiptLineName", type: "string", example: "Product"), new OA\Property(property: "receiptLinePrice", type: "number", example: 25.00), new OA\Property(property: "receiptLineQuantity", type: "integer", example: 1), new OA\Property(property: "receiptLineTotal", type: "number", example: 25.00), new OA\Property(property: "taxCode", type: "string", example: "A"), new OA\Property(property: "taxPercent", type: "number", example: 15), new OA\Property(property: "taxID", type: "integer", example: 1)])),
+                new OA\Property(property: "receiptTaxes", type: "array", items: new OA\Items(type: "object", properties: [new OA\Property(property: "taxCode", type: "string", example: "A"), new OA\Property(property: "taxPercent", type: "number", example: 15), new OA\Property(property: "taxID", type: "integer", example: 1), new OA\Property(property: "taxAmount", type: "number", example: 3.75), new OA\Property(property: "salesAmountWithTax", type: "number", example: 28.75)])),
+                new OA\Property(property: "receiptPayments", type: "array", items: new OA\Items(type: "object", properties: [new OA\Property(property: "moneyTypeCode", type: "string", example: "Cash"), new OA\Property(property: "paymentAmount", type: "number", example: 28.75)])),
+                new OA\Property(property: "receiptTotal", type: "number", example: 28.75),
+                new OA\Property(property: "receiptPrintForm", type: "string", example: "Receipt48")
+            ]
+        )
+    ),
+    responses: [
+        new OA\Response(response: 200, description: "Receipt submitted", content: new OA\JsonContent(properties: [new OA\Property(property: "success", type: "boolean"), new OA\Property(property: "data", type: "object", properties: [new OA\Property(property: "receiptID", type: "integer"), new OA\Property(property: "serverDate", type: "string"), new OA\Property(property: "receiptServerSignature", type: "object"), new OA\Property(property: "operationID", type: "string")]), new OA\Property(property: "fiscal_day_no", type: "integer")])),
+        new OA\Response(response: 400, description: "Error submitting receipt or no open fiscal day")
+    ]
+)]
+#[OA\Post(
+    path: "/zimra/submit-file",
+    summary: "Submit fiscal file to ZIMRA",
+    description: "Submit a fiscal day file to ZIMRA. Used after closing a fiscal day. Content-Type is text/plain.",
+    tags: ["ZIMRA Fiscalisation"],
+    requestBody: new OA\RequestBody(
+        required: true,
+        content: new OA\JsonContent(
+            required: ["header", "content", "footer"],
+            properties: [
+                new OA\Property(property: "header", type: "object", properties: [new OA\Property(property: "fiscalDayNo", type: "integer", example: 1), new OA\Property(property: "fiscalDayOpened", type: "string", format: "date-time", example: "2026-02-19T08:00:00"), new OA\Property(property: "fileSequence", type: "integer", example: 1)]),
+                new OA\Property(property: "content", type: "object", properties: [new OA\Property(property: "receipts", type: "array", items: new OA\Items(type: "object"))]),
+                new OA\Property(property: "footer", type: "object", properties: [new OA\Property(property: "fiscalDayCounters", type: "array", items: new OA\Items(type: "object")), new OA\Property(property: "receiptCounter", type: "integer", example: 0), new OA\Property(property: "fiscalDayClosed", type: "string", format: "date-time", example: "2026-02-19T22:00:00")])
+            ]
+        )
+    ),
+    responses: [
+        new OA\Response(response: 200, description: "File submitted", content: new OA\JsonContent(properties: [new OA\Property(property: "operationID", type: "string")])),
+        new OA\Response(response: 400, description: "Error submitting file")
     ]
 )]
 class OpenApiSpec

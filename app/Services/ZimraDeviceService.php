@@ -481,4 +481,228 @@ class ZimraDeviceService
 
         return $this->closeDay();
     }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Submit Receipt (mTLS + Signing)
+    |--------------------------------------------------------------------------
+    */
+    public function submitReceipt(array $receiptData)
+    {
+        $zimraConfig = ZimraConfig::getActive();
+
+        if (!$zimraConfig) {
+            throw new \Exception('No active ZIMRA configuration found.');
+        }
+
+        $deviceId = $zimraConfig->device_id;
+
+        if (!$deviceId) {
+            throw new \Exception('No device ID found in configuration.');
+        }
+
+        // Check fiscal day is open
+        $fiscalDay = FiscalDay::getCurrentOpen($deviceId);
+        if (!$fiscalDay) {
+            return [
+                'error' => true,
+                'message' => 'No open fiscal day. Open a fiscal day before submitting receipts.'
+            ];
+        }
+
+        $baseUrl = $zimraConfig->base_url;
+
+        // Write certificates from database to files for mTLS
+        if ($zimraConfig->certificate && $zimraConfig->private_key) {
+            Storage::put('zimra/device_certificate.pem', $zimraConfig->certificate);
+            Storage::put('zimra/device_private.key', $zimraConfig->private_key);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | 1️⃣ Generate Device Signature
+        |--------------------------------------------------------------------------
+        */
+
+        // Remove existing signature if present
+        unset($receiptData['receiptDeviceSignature']);
+
+        // Set fiscal day number from current open day
+        $receiptData['fiscalDayNo'] = $fiscalDay->fiscal_day_no;
+
+        $receiptJson = json_encode($receiptData, JSON_UNESCAPED_SLASHES);
+
+        // Generate SHA256 hash (binary)
+        $hashBinary = hash('sha256', $receiptJson, true);
+
+        // Base64 encoded hash
+        $hashBase64 = base64_encode($hashBinary);
+
+        // Load private key
+        $privateKeyPath = storage_path('app/zimra/device_private.key');
+        $privateKey = openssl_pkey_get_private(file_get_contents($privateKeyPath));
+
+        if (!$privateKey) {
+            throw new \Exception('Failed to load private key for signing.');
+        }
+
+        // Sign hash with ECDSA
+        openssl_sign($hashBinary, $signatureBinary, $privateKey, OPENSSL_ALGO_SHA256);
+
+        $signatureBase64 = base64_encode($signatureBinary);
+
+        // Add signature to receipt
+        $receiptData['receiptDeviceSignature'] = [
+            'hash' => $hashBase64,
+            'signature' => $signatureBase64,
+        ];
+
+        /*
+        |--------------------------------------------------------------------------
+        | 2️⃣ Send To ZIMRA
+        |--------------------------------------------------------------------------
+        */
+
+        $response = Http::withOptions([
+            'cert' => storage_path('app/zimra/device_certificate.pem'),
+            'ssl_key' => storage_path('app/zimra/device_private.key'),
+        ])->withHeaders([
+            'DeviceModelName' => $zimraConfig->device_model,
+            'DeviceModelVersion' => $zimraConfig->device_version,
+            'Accept' => 'application/json',
+            'Content-Type' => 'application/json',
+        ])->post("{$baseUrl}/Device/v1/{$deviceId}/SubmitReceipt", [
+            'receipt' => $receiptData
+        ]);
+
+        if (!$response->successful()) {
+            Log::error('ZIMRA SubmitReceipt Failed', [
+                'status' => $response->status(),
+                'body' => $response->json()
+            ]);
+            return [
+                'error' => true,
+                'status' => $response->status(),
+                'body' => $response->json()
+            ];
+        }
+
+        $responseData = $response->json();
+
+        /*
+        |--------------------------------------------------------------------------
+        | 3️⃣ Update Fiscal Day Counters
+        |--------------------------------------------------------------------------
+        */
+        $this->updateFiscalCounters($fiscalDay, $receiptData);
+
+        Log::info('ZIMRA Receipt Submitted', [
+            'receipt_id' => $responseData['receiptID'] ?? null,
+            'fiscal_day_no' => $fiscalDay->fiscal_day_no
+        ]);
+
+        return [
+            'success' => true,
+            'data' => $responseData,
+            'fiscal_day_no' => $fiscalDay->fiscal_day_no
+        ];
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Update Fiscal Counters After Receipt
+    |--------------------------------------------------------------------------
+    */
+    private function updateFiscalCounters(FiscalDay $fiscalDay, array $receiptData): void
+    {
+        // Increment receipt counter
+        $fiscalDay->increment('receipt_counter');
+
+        // Update fiscal counters from receipt taxes
+        $counters = $fiscalDay->fiscal_counters ?? [];
+
+        if (isset($receiptData['receiptTaxes']) && is_array($receiptData['receiptTaxes'])) {
+            foreach ($receiptData['receiptTaxes'] as $tax) {
+                $key = $tax['taxCode'] . '_' . ($tax['taxPercent'] ?? 0);
+
+                if (!isset($counters[$key])) {
+                    $counters[$key] = [
+                        'fiscalCounterType' => 'saleByTax',
+                        'fiscalCounterCurrency' => $receiptData['receiptCurrency'] ?? 'USD',
+                        'fiscalCounterTaxPercent' => $tax['taxPercent'] ?? 0,
+                        'fiscalCounterTaxID' => $tax['taxID'] ?? 1,
+                        'fiscalCounterMoneyType' => 'Cash',
+                        'fiscalCounterValue' => 0,
+                    ];
+                }
+
+                $counters[$key]['fiscalCounterValue'] += $tax['salesAmountWithTax'] ?? 0;
+            }
+        }
+
+        $fiscalDay->update(['fiscal_counters' => array_values($counters)]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Submit File (mTLS + text/plain)
+    |--------------------------------------------------------------------------
+    */
+    public function submitFile(array $payload)
+    {
+        $zimraConfig = ZimraConfig::getActive();
+
+        if (!$zimraConfig) {
+            throw new \Exception('No active ZIMRA configuration found.');
+        }
+
+        $deviceId = $zimraConfig->device_id;
+
+        if (!$deviceId) {
+            throw new \Exception('No device ID found in configuration.');
+        }
+
+        $baseUrl = $zimraConfig->base_url;
+
+        // Write certificates from database to files for mTLS
+        if ($zimraConfig->certificate && $zimraConfig->private_key) {
+            Storage::put('zimra/device_certificate.pem', $zimraConfig->certificate);
+            Storage::put('zimra/device_private.key', $zimraConfig->private_key);
+        }
+
+        // Ensure deviceId inside header matches URL
+        if (isset($payload['header'])) {
+            $payload['header']['deviceId'] = $deviceId;
+        }
+
+        // Convert JSON to raw string
+        $rawJson = json_encode($payload, JSON_UNESCAPED_SLASHES);
+
+        $response = Http::withOptions([
+            'cert' => storage_path('app/zimra/device_certificate.pem'),
+            'ssl_key' => storage_path('app/zimra/device_private.key'),
+        ])->withHeaders([
+            'DeviceModelName' => $zimraConfig->device_model,
+            'DeviceModelVersion' => $zimraConfig->device_version,
+            'Accept' => 'application/json',
+            'Content-Type' => 'text/plain',
+        ])->withBody($rawJson, 'text/plain')
+          ->post("{$baseUrl}/Device/v1/{$deviceId}/SubmitFile");
+
+        if (!$response->successful()) {
+            Log::error('ZIMRA SubmitFile Failed', [
+                'status' => $response->status(),
+                'body' => $response->json()
+            ]);
+            return [
+                'error' => true,
+                'status' => $response->status(),
+                'body' => $response->json()
+            ];
+        }
+
+        Log::info('ZIMRA File Submitted', $response->json() ?? []);
+
+        return $response->json();
+    }
 }

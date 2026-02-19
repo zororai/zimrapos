@@ -212,4 +212,48 @@ class ZimraController extends Controller
             'fiscal_day' => $fiscalDay
         ]);
     }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Submit Receipt (mTLS + Signing)
+    |--------------------------------------------------------------------------
+    */
+    public function submitReceipt(Request $request, ZimraDeviceService $zimra)
+    {
+        try {
+            $result = $zimra->submitReceipt($request->all());
+
+            if (isset($result['error']) && $result['error']) {
+                return response()->json($result, 400);
+            }
+
+            return response()->json($result);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Submit File (mTLS + text/plain)
+    |--------------------------------------------------------------------------
+    */
+    public function submitFile(Request $request, ZimraDeviceService $zimra)
+    {
+        try {
+            $result = $zimra->submitFile($request->all());
+
+            if (isset($result['error']) && $result['error']) {
+                return response()->json($result, 400);
+            }
+
+            return response()->json($result);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => $e->getMessage(),
+            ], 400);
+        }
+    }
 }
