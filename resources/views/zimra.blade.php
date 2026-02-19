@@ -205,19 +205,28 @@
                                         </svg>
                                         <span class="font-semibold">Device Registered Successfully</span>
                                     </div>
-                                    <button @click="getDeviceStatus()" :disabled="loading" class="px-3 py-1 bg-green-600 text-white text-sm font-medium rounded hover:bg-green-700 disabled:opacity-50 flex items-center space-x-1">
-                                        <svg x-show="loading" class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
-                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                                        </svg>
-                                        <span>Get Status</span>
-                                    </button>
+                                    <div class="flex space-x-2">
+                                        <button @click="getDeviceConfig()" :disabled="loading" class="px-3 py-1 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-1">
+                                            <svg x-show="loading" class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                            </svg>
+                                            <span>Get Config</span>
+                                        </button>
+                                        <button @click="getDeviceStatus()" :disabled="loading" class="px-3 py-1 bg-green-600 text-white text-sm font-medium rounded hover:bg-green-700 disabled:opacity-50 flex items-center space-x-1">
+                                            <svg x-show="loading" class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                            </svg>
+                                            <span>Get Status</span>
+                                        </button>
+                                    </div>
                                 </div>
                                 <div class="grid grid-cols-2 gap-3 text-sm text-green-700">
                                     <div><span class="text-green-600">Device ID:</span> <strong x-text="config.device_id"></strong></div>
                                     <div><span class="text-green-600">Serial Number:</span> <strong x-text="config.serial_number || 'N/A'"></strong></div>
                                     <div><span class="text-green-600">Certificate:</span> <strong x-text="config.certificate ? '✓ Stored' : '✗ Missing'"></strong></div>
-                                    <div><span class="text-green-600">API URL:</span> <strong x-text="config.base_url + '/Device/v1/' + config.device_id + '/GetStatus'"></strong></div>
+                                    <div><span class="text-green-600">QR URL:</span> <strong x-text="config.qr_url ? '✓ Configured' : '✗ Click Get Config'"></strong></div>
                                 </div>
                             </div>
 
@@ -729,6 +738,24 @@
                         console.error('Failed to load fiscal day:', e);
                         this.showMessage('Failed to load fiscal day: ' + e.message, 'error');
                     }
+                },
+
+                async getDeviceConfig() {
+                    this.loading = true;
+                    try {
+                        const res = await fetch('/zimra/device-config');
+                        const data = await res.json();
+                        if (res.ok && !data.error) {
+                            this.showMessage('Config retrieved! QR URL: ' + (data.qrUrl || 'Not available'), 'success');
+                            // Reload config to get updated qr_url
+                            await this.loadConfig();
+                        } else {
+                            this.showMessage(data.error || 'Failed to get device config', 'error');
+                        }
+                    } catch (e) {
+                        this.showMessage('An error occurred: ' + e.message, 'error');
+                    }
+                    this.loading = false;
                 },
 
                 async getDeviceStatus() {

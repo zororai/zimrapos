@@ -167,7 +167,19 @@ class ZimraController extends Controller
     public function status(ZimraDeviceService $zimra)
     {
         try {
-            return response()->json($zimra->getStatus());
+            $status = $zimra->getStatus();
+            
+            // Save status data to config for QR code generation
+            $config = ZimraConfig::getActive();
+            if ($config && !isset($status['error'])) {
+                $config->update([
+                    'fiscal_day_status' => $status['fiscalDayStatus'] ?? null,
+                    'last_receipt_global_no' => $status['lastReceiptGlobalNo'] ?? null,
+                    'last_fiscal_day_no' => $status['lastFiscalDayNo'] ?? null,
+                ]);
+            }
+            
+            return response()->json($status);
         } catch (\Exception $e) {
             return response()->json([
                 'error' => $e->getMessage(),
@@ -298,17 +310,25 @@ class ZimraController extends Controller
 
             // Save receipt to database
             $config = ZimraConfig::getActive();
-            $fiscalDay = $zimra->getCurrentFiscalDay();
             
-            // Build QR string with all required parameters
-            $qrString = null;
-            if ($config->qr_url) {
-                $qrString = $config->qr_url .
-                    "?deviceID=" . $config->device_id .
-                    "&receiptID=" . $receiptID .
-                    "&fiscalDayNo=" . ($fiscalDay?->fiscal_day_no ?? 1) .
-                    "&receiptGlobalNo=" . ($data['receiptGlobalNo'] ?? 1);
+            // Get fiscalDayNo and receiptGlobalNo from request or ZIMRA response
+            $fiscalDayNo = $data['fiscalDayNo'] ?? $result['fiscal_day_no'] ?? 1;
+            $receiptGlobalNo = $data['receiptGlobalNo'] ?? $data['receiptCounter'] ?? 1;
+            
+            // Validate QR requirements
+            if (!$config->qr_url) {
+                \Log::error('QR generation failed: qr_url not set. Call getConfig first.');
+                throw new \Exception("QR generation failed: Missing qr_url. Call getConfig first.");
             }
+            
+            // Build QR string immediately with submitted values
+            $qrString = $config->qr_url .
+                "?deviceID=" . $config->device_id .
+                "&receiptID=" . $receiptID .
+                "&fiscalDayNo=" . $fiscalDayNo .
+                "&receiptGlobalNo=" . $receiptGlobalNo;
+            
+            \Log::info('QR String built', ['qr_string' => $qrString]);
             
             $receipt = Receipt::create([
                 'device_id' => $config->device_id,
@@ -316,8 +336,8 @@ class ZimraController extends Controller
                 'receipt_type' => $data['receiptType'] ?? 'FiscalInvoice',
                 'receipt_currency' => $data['receiptCurrency'] ?? 'USD',
                 'receipt_counter' => $data['receiptCounter'] ?? 1,
-                'receipt_global_no' => $data['receiptGlobalNo'] ?? 1,
-                'fiscal_day_no' => $fiscalDay?->fiscal_day_no ?? 1,
+                'receipt_global_no' => $receiptGlobalNo,
+                'fiscal_day_no' => $fiscalDayNo,
                 'receipt_total' => $data['receiptTotal'] ?? 0,
                 'tax_amount' => $data['receiptTaxes'][0]['taxAmount'] ?? 0,
                 'tax_code' => $data['receiptTaxes'][0]['taxCode'] ?? 'A',

@@ -609,6 +609,9 @@ class ZimraDeviceService
             ];
         }
 
+        // Sign the payload - required by ZIMRA
+        $payload['fiscalDayDeviceSignature'] = $this->signData($payload);
+
         $response = Http::withOptions([
             'cert' => storage_path('app/zimra/device_certificate.pem'),
             'ssl_key' => storage_path('app/zimra/device_private.key'),

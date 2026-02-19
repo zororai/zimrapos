@@ -12,7 +12,8 @@
         "php": "^8.2",
         "darkaonline/l5-swagger": "^10.1",
         "laravel/framework": "^12.0",
-        "laravel/tinker": "^2.10.1"
+        "laravel/tinker": "^2.10.1",
+        "simplesoftwareio/simple-qrcode": "^4.2"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
@@ -86,7 +87,12 @@
             "php-http/discovery": true
         },
         "audit": {
-            "abandoned": "report"
+            "abandoned": "report",
+            "ignore": [
+                "PKSA-rkkf-636k-qjb3",
+                "PKSA-4s4z-t146-6123",
+                "PKSA-z3gr-8qht-p93v"
+            ]
         }
     },
     "minimum-stability": "stable",

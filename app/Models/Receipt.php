@@ -34,6 +34,7 @@ class Receipt extends Model
         'receipt_lines' => 'array',
         'receipt_taxes' => 'array',
         'receipt_payments' => 'array',
+        'receipt_signature' => 'array',
         'zimra_response' => 'array',
         'receipt_date' => 'datetime',
         'receipt_total' => 'decimal:2',

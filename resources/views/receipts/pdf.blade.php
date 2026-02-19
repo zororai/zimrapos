@@ -295,9 +295,13 @@
             @endif
             @if($receipt->receipt_signature)
             <div class="info-row">
-                <span class="info-label">Digital Signature:</span>
+                <span class="info-label">Server Signature:</span>
             </div>
-            <div class="signature-box">{{ $receipt->receipt_signature }}</div>
+            <div class="signature-box">{{ $receipt->receipt_signature['signature'] ?? '' }}</div>
+            <div class="info-row" style="margin-top: 5px;">
+                <span class="info-label">Certificate:</span>
+                <span class="info-value">{{ $receipt->receipt_signature['certificateThumbprint'] ?? '' }}</span>
+            </div>
             @endif
         </div>
         
@@ -318,14 +322,21 @@
             <p>Generated on {{ now()->format('d M Y H:i:s') }}</p>
         </div>
         
-        <button class="print-btn no-print" onclick="window.print()">
-            Print / Save as PDF
-        </button>
+        <div class="no-print" style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+            <button class="print-btn" onclick="window.print()">
+                Print / Save as PDF
+            </button>
+            @if($receipt->receipt_qr_code)
+            <a href="{{ $receipt->receipt_qr_code }}" target="_blank" class="print-btn" style="text-decoration: none; background: #2563eb;">
+                Verify on ZIMRA Portal
+            </a>
+            @endif
+        </div>
     </div>
     
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // QR string is pre-built with: qrUrl?deviceID=X&receiptID=X&fiscalDayNo=X&receiptGlobalNo=X
+            // ONLY use stored QR string - NO dynamic fallback
             var qrString = '{{ $receipt->receipt_qr_code ?? "" }}';
             
             if (qrString && typeof qrcode !== 'undefined') {
@@ -333,8 +344,8 @@
                 qr.addData(qrString);
                 qr.make();
                 document.getElementById('qrcode').innerHTML = qr.createImgTag(4);
-            } else if (!qrString) {
-                document.getElementById('qrcode').innerHTML = '<p style="color:#999;font-size:10px;">QR not available - call getConfig first</p>';
+            } else {
+                document.getElementById('qrcode').innerHTML = '<p style="color:#999;font-size:10px;">QR not available - receipt was submitted before getConfig was called</p>';
             }
         });
     </script>

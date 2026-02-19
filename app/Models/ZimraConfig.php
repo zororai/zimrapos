@@ -21,6 +21,9 @@ class ZimraConfig extends Model
         'taxes',
         'device_operating_mode',
         'certificate_valid_till',
+        'fiscal_day_status',
+        'last_receipt_global_no',
+        'last_fiscal_day_no',
     ];
 
     protected $hidden = [
