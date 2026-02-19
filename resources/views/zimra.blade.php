@@ -511,8 +511,65 @@
                                         <p>Server Date: <span x-text="lastReceiptResponse.data?.serverDate"></span></p>
                                         <p>Operation ID: <span x-text="lastReceiptResponse.data?.operationID"></span></p>
                                     </div>
+                                    <a x-show="lastReceiptResponse.receipt_id" :href="'/zimra/receipts/' + lastReceiptResponse.receipt_id + '/pdf'" target="_blank" class="inline-flex items-center mt-3 px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700">
+                                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                        </svg>
+                                        Download PDF
+                                    </a>
                                 </div>
                             </template>
+
+                            <!-- Receipts History -->
+                            <div class="mt-6">
+                                <div class="flex items-center justify-between mb-4">
+                                    <h3 class="text-lg font-semibold text-gray-900">Receipt History</h3>
+                                    <button @click="loadReceipts()" class="text-sm text-green-600 hover:text-green-800">
+                                        <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                        </svg>
+                                        Refresh
+                                    </button>
+                                </div>
+                                
+                                <div x-show="receipts.length === 0" class="text-center py-8 text-gray-500">
+                                    <p>No receipts submitted yet</p>
+                                </div>
+                                
+                                <div x-show="receipts.length > 0" class="overflow-x-auto">
+                                    <table class="min-w-full divide-y divide-gray-200">
+                                        <thead class="bg-gray-50">
+                                            <tr>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invoice</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tax</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Payment</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="bg-white divide-y divide-gray-200">
+                                            <template x-for="receipt in receipts" :key="receipt.id">
+                                                <tr>
+                                                    <td class="px-4 py-3 text-sm font-medium text-gray-900" x-text="receipt.invoice_no"></td>
+                                                    <td class="px-4 py-3 text-sm text-gray-500" x-text="new Date(receipt.receipt_date).toLocaleDateString()"></td>
+                                                    <td class="px-4 py-3 text-sm text-gray-900" x-text="receipt.receipt_currency + ' ' + parseFloat(receipt.receipt_total).toFixed(2)"></td>
+                                                    <td class="px-4 py-3 text-sm text-gray-500" x-text="receipt.tax_code + ' (' + receipt.tax_percent + '%)'"></td>
+                                                    <td class="px-4 py-3 text-sm text-gray-500" x-text="receipt.payment_method"></td>
+                                                    <td class="px-4 py-3 text-sm">
+                                                        <a :href="'/zimra/receipts/' + receipt.id + '/pdf'" target="_blank" class="text-green-600 hover:text-green-800">
+                                                            <svg class="w-5 h-5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                                            </svg>
+                                                            PDF
+                                                        </a>
+                                                    </td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
                     </template>
                 </div>
@@ -617,10 +674,30 @@
                 submitFilePayload: '',
                 submitFileResponse: null,
                 deviceStatus: null,
+                receipts: [],
                 
                 async init() {
                     await this.loadConfig();
                     await this.loadFiscalDay();
+                    this.generateInvoiceNo();
+                    await this.loadReceipts();
+                },
+                
+                async loadReceipts() {
+                    try {
+                        const res = await fetch('/zimra/receipts');
+                        if (res.ok) {
+                            this.receipts = await res.json();
+                        }
+                    } catch (e) {
+                        console.error('Failed to load receipts:', e);
+                    }
+                },
+                
+                generateInvoiceNo() {
+                    let counter = parseInt(localStorage.getItem('zimra_invoice_counter') || '0') + 1;
+                    localStorage.setItem('zimra_invoice_counter', counter.toString());
+                    this.receiptForm.invoiceNo = 'INV-' + counter.toString().padStart(3, '0');
                 },
                 
                 async loadConfig() {
@@ -946,8 +1023,9 @@
                             this.showMessage('Receipt submitted successfully!', 'success');
                             this.lastReceiptResponse = data;
                             await this.loadFiscalDay();
-                            // Reset form
-                            this.receiptForm.invoiceNo = '';
+                            await this.loadReceipts();
+                            // Reset form and generate next invoice number
+                            this.generateInvoiceNo();
                             this.receiptForm.receiptLines = [{ receiptLineName: '', receiptLineQuantity: 1, receiptLinePrice: 0, receiptLineHSCode: '' }];
                         } else {
                             this.showMessage(data.error || data.message || 'Failed to submit receipt', 'error');

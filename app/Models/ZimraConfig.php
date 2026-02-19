@@ -17,6 +17,10 @@ class ZimraConfig extends Model
         'certificate',
         'is_active',
         'reporting_frequency',
+        'qr_url',
+        'taxes',
+        'device_operating_mode',
+        'certificate_valid_till',
     ];
 
     protected $hidden = [
@@ -30,6 +34,8 @@ class ZimraConfig extends Model
             'is_active' => 'boolean',
             'device_id' => 'integer',
             'reporting_frequency' => 'integer',
+            'taxes' => 'array',
+            'certificate_valid_till' => 'datetime',
         ];
     }
 

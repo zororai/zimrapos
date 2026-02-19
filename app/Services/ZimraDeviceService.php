@@ -304,11 +304,26 @@ class ZimraDeviceService
         $baseUrl = $zimraConfig->base_url;
         $mtls = $this->prepareMtlsCertificates($zimraConfig);
 
-        return Http::withOptions($mtls)->withHeaders([
+        $response = Http::withOptions($mtls)->withHeaders([
             'DeviceModelName' => $zimraConfig->device_model,
             'DeviceModelVersion' => $zimraConfig->device_version,
         ])->get("{$baseUrl}/Device/v1/{$deviceId}/GetConfig")
           ->json();
+
+        // Store important config data from ZIMRA response
+        if ($response && !isset($response['error'])) {
+            $zimraConfig->update([
+                'qr_url' => $response['qrUrl'] ?? null,
+                'taxes' => $response['taxes'] ?? null,
+                'device_operating_mode' => $response['deviceOperatingMode'] ?? null,
+                'certificate_valid_till' => isset($response['certificateValidTill']) 
+                    ? \Carbon\Carbon::parse($response['certificateValidTill']) 
+                    : null,
+            ]);
+            Log::info('ZIMRA Config updated from GetConfig', ['qr_url' => $response['qrUrl'] ?? null]);
+        }
+
+        return $response;
     }
 
     /*

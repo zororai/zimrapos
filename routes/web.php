@@ -26,3 +26,8 @@ Route::post('/zimra/close-day', [ZimraController::class, 'closeDay']);
 Route::get('/zimra/fiscal-day', [ZimraController::class, 'fiscalDayStatus']);
 Route::post('/zimra/submit-receipt', [ZimraController::class, 'submitReceipt']);
 Route::post('/zimra/submit-file', [ZimraController::class, 'submitFile']);
+Route::get('/zimra/receipts', [ZimraController::class, 'getReceipts']);
+Route::get('/zimra/receipts/{id}/pdf', [ZimraController::class, 'downloadReceiptPdf']);
+
+// Test Route
+Route::get('/test-zimra', [\App\Http\Controllers\ZimraTestController::class, 'test']);

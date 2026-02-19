@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Receipt;
 use App\Models\ZimraConfig;
 use App\Services\ZimraDeviceService;
 use Illuminate\Http\Request;
@@ -275,18 +276,103 @@ class ZimraController extends Controller
     public function submitReceipt(Request $request, ZimraDeviceService $zimra)
     {
         try {
-            $result = $zimra->submitReceipt($request->all());
+            $data = $request->all();
+            $result = $zimra->submitReceipt($data);
+
+            // Log full ZIMRA response for debugging
+            \Log::info('ZIMRA submitReceipt Response', $result);
 
             if (isset($result['error']) && $result['error']) {
                 return response()->json($result, 400);
             }
 
+            // Validate receiptID - CRITICAL for verification
+            $receiptID = $result['data']['receiptID'] ?? $result['receiptID'] ?? null;
+            if (!$receiptID) {
+                \Log::error('ZIMRA Receipt not accepted - No receiptID returned', $result);
+                return response()->json([
+                    'error' => 'Receipt not accepted by ZIMRA. No verification possible.',
+                    'zimra_response' => $result,
+                ], 400);
+            }
+
+            // Save receipt to database
+            $config = ZimraConfig::getActive();
+            $fiscalDay = $zimra->getCurrentFiscalDay();
+            
+            // Build QR string with all required parameters
+            $qrString = null;
+            if ($config->qr_url) {
+                $qrString = $config->qr_url .
+                    "?deviceID=" . $config->device_id .
+                    "&receiptID=" . $receiptID .
+                    "&fiscalDayNo=" . ($fiscalDay?->fiscal_day_no ?? 1) .
+                    "&receiptGlobalNo=" . ($data['receiptGlobalNo'] ?? 1);
+            }
+            
+            $receipt = Receipt::create([
+                'device_id' => $config->device_id,
+                'invoice_no' => $data['invoiceNo'] ?? '',
+                'receipt_type' => $data['receiptType'] ?? 'FiscalInvoice',
+                'receipt_currency' => $data['receiptCurrency'] ?? 'USD',
+                'receipt_counter' => $data['receiptCounter'] ?? 1,
+                'receipt_global_no' => $data['receiptGlobalNo'] ?? 1,
+                'fiscal_day_no' => $fiscalDay?->fiscal_day_no ?? 1,
+                'receipt_total' => $data['receiptTotal'] ?? 0,
+                'tax_amount' => $data['receiptTaxes'][0]['taxAmount'] ?? 0,
+                'tax_code' => $data['receiptTaxes'][0]['taxCode'] ?? 'A',
+                'tax_percent' => $data['receiptTaxes'][0]['taxPercent'] ?? 15,
+                'payment_method' => $data['receiptPayments'][0]['moneyTypeCode'] ?? 'Cash',
+                'receipt_lines' => $data['receiptLines'] ?? [],
+                'receipt_taxes' => $data['receiptTaxes'] ?? [],
+                'receipt_payments' => $data['receiptPayments'] ?? [],
+                'receipt_hash' => $result['receiptHash'] ?? null,
+                'receipt_signature' => $result['data']['receiptServerSignature'] ?? $result['receiptServerSignature'] ?? null,
+                'receipt_qr_code' => $qrString,
+                'verification_code' => null, // Never generated locally - comes from portal scan
+                'zimra_response' => $result,
+                'receipt_date' => now(),
+            ]);
+
+            $result['receipt_id'] = $receipt->id;
+            $result['qr_string'] = $qrString;
+
+            \Log::info('Receipt saved successfully', ['receipt_id' => $receipt->id, 'zimra_receipt_id' => $receiptID]);
+
             return response()->json($result);
         } catch (\Exception $e) {
+            \Log::error('submitReceipt failed', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
             return response()->json([
                 'error' => $e->getMessage(),
             ], 400);
         }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Download Receipt PDF
+    |--------------------------------------------------------------------------
+    */
+    public function downloadReceiptPdf($id)
+    {
+        $receipt = Receipt::findOrFail($id);
+        $config = ZimraConfig::getActive();
+        
+        return view('receipts.pdf', [
+            'receipt' => $receipt,
+            'config' => $config,
+        ]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Get All Receipts
+    |--------------------------------------------------------------------------
+    */
+    public function getReceipts()
+    {
+        $receipts = Receipt::orderBy('created_at', 'desc')->limit(50)->get();
+        return response()->json($receipts);
     }
 
     /*
