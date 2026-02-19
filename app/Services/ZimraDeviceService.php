@@ -10,6 +10,76 @@ use Illuminate\Support\Facades\Storage;
 
 class ZimraDeviceService
 {
+    /**
+     * Prepare mTLS certificates - validates and writes to storage
+     * @throws \Exception if certificates are not found
+     */
+    private function prepareMtlsCertificates(ZimraConfig $zimraConfig): array
+    {
+        if (!$zimraConfig->certificate || !$zimraConfig->private_key) {
+            throw new \Exception('Device certificates not found. Please register the device or upload certificates first.');
+        }
+
+        // Ensure directory exists
+        $zimraDir = storage_path('app/zimra');
+        if (!is_dir($zimraDir)) {
+            mkdir($zimraDir, 0755, true);
+        }
+
+        // Write certificates directly to files (bypass Storage facade for reliability)
+        $certPath = $zimraDir . DIRECTORY_SEPARATOR . 'device_certificate.pem';
+        $keyPath = $zimraDir . DIRECTORY_SEPARATOR . 'device_private.key';
+
+        file_put_contents($certPath, $zimraConfig->certificate);
+        file_put_contents($keyPath, $zimraConfig->private_key);
+
+        // Verify files were created
+        if (!file_exists($certPath)) {
+            throw new \Exception('Failed to write certificate file to: ' . $certPath);
+        }
+        if (!file_exists($keyPath)) {
+            throw new \Exception('Failed to write private key file to: ' . $keyPath);
+        }
+
+        Log::info('mTLS certificates written', ['cert' => $certPath, 'key' => $keyPath]);
+
+        return [
+            'cert' => $certPath,
+            'ssl_key' => $keyPath,
+        ];
+    }
+
+    /**
+     * Sign data for ZIMRA (SHA256 hash + ECDSA signature)
+     */
+    private function signData(array $data): array
+    {
+        $json = json_encode($data, JSON_UNESCAPED_SLASHES);
+
+        $hashBinary = hash('sha256', $json, true);
+        $hashBase64 = base64_encode($hashBinary);
+
+        $privateKeyPath = storage_path('app/zimra/device_private.key');
+        
+        if (!file_exists($privateKeyPath)) {
+            throw new \Exception('Device private key not found. Please register device first.');
+        }
+
+        $privateKey = openssl_pkey_get_private(file_get_contents($privateKeyPath));
+
+        if (!$privateKey) {
+            throw new \Exception('Failed to load private key for signing.');
+        }
+
+        openssl_sign($hashBinary, $signatureBinary, $privateKey, OPENSSL_ALGO_SHA256);
+        $signatureBase64 = base64_encode($signatureBinary);
+
+        return [
+            'hash' => $hashBase64,
+            'signature' => $signatureBase64,
+        ];
+    }
+
     public function registerDevice(int $deviceId, string $serialNumber, string $activationKey)
     {
         $zimraConfig = ZimraConfig::getActive();
@@ -113,6 +183,11 @@ class ZimraDeviceService
         */
         $baseUrl = $zimraConfig->base_url;
 
+        Log::info('Sending registration request to ZIMRA', [
+            'url' => "{$baseUrl}/Public/v1/{$deviceId}/RegisterDevice",
+            'csr_length' => strlen($csrForJson)
+        ]);
+
         $response = Http::withHeaders([
             'DeviceModelName' => $zimraConfig->device_model,
             'DeviceModelVersion' => $zimraConfig->device_version,
@@ -122,7 +197,17 @@ class ZimraDeviceService
             "activationKey" => $activationKey
         ]);
 
+        Log::info('ZIMRA registration response', [
+            'status' => $response->status(),
+            'successful' => $response->successful(),
+            'body' => $response->body()
+        ]);
+
         if (!$response->successful()) {
+            Log::error('ZIMRA registration failed', [
+                'status' => $response->status(),
+                'body' => $response->json()
+            ]);
             return $response->json();
         }
 
@@ -156,6 +241,49 @@ class ZimraDeviceService
 
     /*
     |--------------------------------------------------------------------------
+    | Upload Existing Certificates (for pre-registered devices)
+    |--------------------------------------------------------------------------
+    */
+    public function uploadCertificates(int $deviceId, string $serialNumber, string $certificate, string $privateKey)
+    {
+        $zimraConfig = ZimraConfig::getActive();
+
+        if (!$zimraConfig) {
+            throw new \Exception('No active ZIMRA configuration found. Please create one first.');
+        }
+
+        // Validate certificate format
+        if (strpos($certificate, '-----BEGIN CERTIFICATE-----') === false) {
+            throw new \Exception('Invalid certificate format. Must be PEM format.');
+        }
+
+        // Validate private key format
+        if (strpos($privateKey, '-----BEGIN') === false || strpos($privateKey, 'PRIVATE KEY-----') === false) {
+            throw new \Exception('Invalid private key format. Must be PEM format.');
+        }
+
+        // Save files to storage
+        Storage::put('zimra/device_certificate.pem', $certificate);
+        Storage::put('zimra/device_private.key', $privateKey);
+
+        // Update config in database
+        $zimraConfig->update([
+            'device_id' => $deviceId,
+            'serial_number' => $serialNumber,
+            'certificate' => $certificate,
+            'private_key' => $privateKey,
+        ]);
+
+        Log::info('Certificates uploaded for device', ['device_id' => $deviceId, 'serial_number' => $serialNumber]);
+
+        return [
+            "message" => "Certificates uploaded successfully",
+            "device_id" => $deviceId
+        ];
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Get Device Config (mTLS)
     |--------------------------------------------------------------------------
     */
@@ -174,21 +302,9 @@ class ZimraDeviceService
         }
 
         $baseUrl = $zimraConfig->base_url;
+        $mtls = $this->prepareMtlsCertificates($zimraConfig);
 
-        // Use certificate from database if available, otherwise from file
-        if ($zimraConfig->certificate && $zimraConfig->private_key) {
-            $certPath = storage_path('app/zimra/device_certificate.pem');
-            $keyPath = storage_path('app/zimra/device_private.key');
-
-            // Write to temp files for mTLS
-            Storage::put('zimra/device_certificate.pem', $zimraConfig->certificate);
-            Storage::put('zimra/device_private.key', $zimraConfig->private_key);
-        }
-
-        return Http::withOptions([
-            'cert' => storage_path('app/zimra/device_certificate.pem'),
-            'ssl_key' => storage_path('app/zimra/device_private.key'),
-        ])->withHeaders([
+        return Http::withOptions($mtls)->withHeaders([
             'DeviceModelName' => $zimraConfig->device_model,
             'DeviceModelVersion' => $zimraConfig->device_version,
         ])->get("{$baseUrl}/Device/v1/{$deviceId}/GetConfig")
@@ -215,17 +331,9 @@ class ZimraDeviceService
         }
 
         $baseUrl = $zimraConfig->base_url;
+        $mtls = $this->prepareMtlsCertificates($zimraConfig);
 
-        // Write certificates from database to files for mTLS
-        if ($zimraConfig->certificate && $zimraConfig->private_key) {
-            Storage::put('zimra/device_certificate.pem', $zimraConfig->certificate);
-            Storage::put('zimra/device_private.key', $zimraConfig->private_key);
-        }
-
-        $response = Http::withOptions([
-            'cert' => storage_path('app/zimra/device_certificate.pem'),
-            'ssl_key' => storage_path('app/zimra/device_private.key'),
-        ])->withHeaders([
+        $response = Http::withOptions($mtls)->withHeaders([
             'DeviceModelName' => $zimraConfig->device_model,
             'DeviceModelVersion' => $zimraConfig->device_version,
             'Accept' => 'application/json',
@@ -718,8 +826,39 @@ class ZimraDeviceService
             $payload['header']['deviceId'] = $deviceId;
         }
 
+        /*
+        |--------------------------------------------------------------------------
+        | 1️⃣ Sign Each Receipt
+        |--------------------------------------------------------------------------
+        */
+        if (isset($payload['content']['receipts']) && is_array($payload['content']['receipts'])) {
+            foreach ($payload['content']['receipts'] as &$receipt) {
+                unset($receipt['receiptDeviceSignature']);
+                $receipt['receiptDeviceSignature'] = $this->signData($receipt);
+            }
+            unset($receipt);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | 2️⃣ Sign Footer (Header + Content combined)
+        |--------------------------------------------------------------------------
+        */
+        if (isset($payload['footer'])) {
+            $footerData = [
+                'header' => $payload['header'],
+                'content' => $payload['content']
+            ];
+            $payload['footer']['fiscalDayDeviceSignature'] = $this->signData($footerData);
+        }
+
         // Convert JSON to raw string
         $rawJson = json_encode($payload, JSON_UNESCAPED_SLASHES);
+        
+        Log::info('Submitting file to ZIMRA', [
+            'url' => "{$baseUrl}/Device/v1/{$deviceId}/SubmitFile",
+            'payload_size' => strlen($rawJson)
+        ]);
 
         $response = Http::withOptions([
             'cert' => storage_path('app/zimra/device_certificate.pem'),

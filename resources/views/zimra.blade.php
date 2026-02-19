@@ -135,6 +135,9 @@
                     <button @click="activeTab = 'receipts'" class="px-6 py-4 text-sm font-medium border-b-2 transition-colors" :class="activeTab === 'receipts' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
                         Submit Receipt
                     </button>
+                    <button @click="activeTab = 'submitfile'" class="px-6 py-4 text-sm font-medium border-b-2 transition-colors" :class="activeTab === 'submitfile' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
+                        Submit File
+                    </button>
                 </nav>
             </div>
 
@@ -195,47 +198,115 @@
                     <template x-if="config && config.device_id">
                         <div class="space-y-4">
                             <div class="p-4 bg-green-50 border border-green-200 rounded-lg">
-                                <div class="flex items-center text-green-800 mb-3">
-                                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                                    </svg>
-                                    <span class="font-semibold">Device Registered Successfully</span>
+                                <div class="flex items-center justify-between text-green-800 mb-3">
+                                    <div class="flex items-center">
+                                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                        </svg>
+                                        <span class="font-semibold">Device Registered Successfully</span>
+                                    </div>
+                                    <button @click="getDeviceStatus()" :disabled="loading" class="px-3 py-1 bg-green-600 text-white text-sm font-medium rounded hover:bg-green-700 disabled:opacity-50 flex items-center space-x-1">
+                                        <svg x-show="loading" class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                        </svg>
+                                        <span>Get Status</span>
+                                    </button>
                                 </div>
                                 <div class="grid grid-cols-2 gap-3 text-sm text-green-700">
                                     <div><span class="text-green-600">Device ID:</span> <strong x-text="config.device_id"></strong></div>
                                     <div><span class="text-green-600">Serial Number:</span> <strong x-text="config.serial_number || 'N/A'"></strong></div>
                                     <div><span class="text-green-600">Certificate:</span> <strong x-text="config.certificate ? '✓ Stored' : '✗ Missing'"></strong></div>
-                                    <div><span class="text-green-600">Status:</span> <strong>Active</strong></div>
+                                    <div><span class="text-green-600">API URL:</span> <strong x-text="config.base_url + '/Device/v1/' + config.device_id + '/GetStatus'"></strong></div>
                                 </div>
                             </div>
+
+                            <!-- Device Status Response -->
+                            <template x-if="deviceStatus">
+                                <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                    <h4 class="font-semibold text-blue-800 mb-2">Device Status (GetStatus Response)</h4>
+                                    <pre class="text-xs bg-blue-100 p-3 rounded overflow-x-auto text-blue-900" x-text="JSON.stringify(deviceStatus, null, 2)"></pre>
+                                </div>
+                            </template>
+
                             <p class="text-sm text-gray-500">Your device is registered and ready. Go to the <button @click="activeTab = 'fiscal'" class="text-green-600 hover:underline font-medium">Fiscal Day</button> tab to open a fiscal day.</p>
                         </div>
                     </template>
 
                     <template x-if="config && !config.device_id">
-                        <form @submit.prevent="registerDevice()" class="space-y-4 max-w-xl">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Device ID</label>
-                                <input type="number" x-model="registerForm.device_id" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="32558" required>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Serial Number</label>
-                                <input type="text" x-model="registerForm.serial_number" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="your-serial-number" required>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Activation Key</label>
-                                <input type="text" x-model="registerForm.activation_key" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="00362772" required>
-                            </div>
-                            <div>
-                                <button type="submit" :disabled="loading" class="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2">
-                                    <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                                    </svg>
-                                    <span>Register Device</span>
+                        <div class="space-y-6">
+                            <!-- Registration Mode Toggle -->
+                            <div class="flex space-x-4 border-b border-gray-200 pb-4">
+                                <button @click="registrationMode = 'new'" class="px-4 py-2 rounded-lg text-sm font-medium transition-colors" :class="registrationMode === 'new' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'">
+                                    New Registration
+                                </button>
+                                <button @click="registrationMode = 'upload'" class="px-4 py-2 rounded-lg text-sm font-medium transition-colors" :class="registrationMode === 'upload' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'">
+                                    Upload Existing Certificates
                                 </button>
                             </div>
-                        </form>
+
+                            <!-- New Registration Form -->
+                            <form x-show="registrationMode === 'new'" @submit.prevent="registerDevice()" class="space-y-4 max-w-xl">
+                                <div class="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-sm">
+                                    Use this option to register a new device with ZIMRA using an activation key.
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Device ID</label>
+                                    <input type="number" x-model="registerForm.device_id" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="32558" required>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Serial Number</label>
+                                    <input type="text" x-model="registerForm.serial_number" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="your-serial-number" required>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Activation Key</label>
+                                    <input type="text" x-model="registerForm.activation_key" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="00362772" required>
+                                </div>
+                                <div>
+                                    <button type="submit" :disabled="loading" class="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2">
+                                        <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                        </svg>
+                                        <span>Register Device</span>
+                                    </button>
+                                </div>
+                            </form>
+
+                            <!-- Upload Certificates Form -->
+                            <form x-show="registrationMode === 'upload'" @submit.prevent="uploadCertificates()" class="space-y-4 max-w-xl">
+                                <div class="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-700 text-sm">
+                                    Use this option if the device was already registered and you have the certificate files.
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Device ID</label>
+                                    <input type="number" x-model="uploadForm.device_id" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="32558" required>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Serial Number</label>
+                                    <input type="text" x-model="uploadForm.serial_number" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="your-serial-number" required>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Device Certificate (device_certificate.pem)</label>
+                                    <input type="file" @change="handleCertificateFile($event)" accept=".pem,.crt,.cer" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 file:mr-4 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-green-50 file:text-green-700 hover:file:bg-green-100" required>
+                                    <p class="text-xs text-gray-500 mt-1">Upload the device certificate file (.pem format)</p>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Private Key (device_private.key)</label>
+                                    <input type="file" @change="handlePrivateKeyFile($event)" accept=".key,.pem" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 file:mr-4 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-green-50 file:text-green-700 hover:file:bg-green-100" required>
+                                    <p class="text-xs text-gray-500 mt-1">Upload the device private key file (.key or .pem format)</p>
+                                </div>
+                                <div>
+                                    <button type="submit" :disabled="loading || !uploadForm.certificate || !uploadForm.private_key" class="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2">
+                                        <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                        </svg>
+                                        <span>Save Certificates</span>
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
                     </template>
                 </div>
 
@@ -321,12 +392,21 @@
                 </div>
 
                 <!-- Submit Receipt Tab -->
-                <div x-show="activeTab === 'receipts'" x-cloak>
-                    <h2 class="text-lg font-semibold text-gray-900 mb-4">Submit Receipt</h2>
+                <div x-show="activeTab === 'receipts'" x-cloak x-init="loadFiscalDay()">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold text-gray-900">Submit Receipt</h2>
+                        <button @click="loadFiscalDay()" class="text-sm text-green-600 hover:text-green-700 flex items-center space-x-1">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                            <span>Refresh</span>
+                        </button>
+                    </div>
                     
-                    <template x-if="!fiscalDay?.is_open">
+                    <template x-if="!fiscalDay || !fiscalDay.is_open">
                         <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800">
                             Please open a fiscal day first before submitting receipts.
+                            <button @click="activeTab = 'fiscal'" class="ml-2 text-yellow-900 underline font-medium">Go to Fiscal Day</button>
                         </div>
                     </template>
 
@@ -424,6 +504,56 @@
                         </div>
                     </template>
                 </div>
+
+                <!-- Submit File Tab -->
+                <div x-show="activeTab === 'submitfile'" x-cloak>
+                    <h2 class="text-lg font-semibold text-gray-900 mb-4">Submit File to ZIMRA</h2>
+                    
+                    <template x-if="!config?.device_id">
+                        <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800">
+                            Please register a device first before submitting files.
+                        </div>
+                    </template>
+
+                    <template x-if="config?.device_id">
+                        <div class="space-y-6">
+                            <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-sm">
+                                <strong>Note:</strong> SubmitFile is used to submit closed fiscal day data to ZIMRA. 
+                                The fiscal day must be closed before submission. Receipts and footer will be automatically signed.
+                            </div>
+
+                            <form @submit.prevent="submitFile()" class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">JSON Payload</label>
+                                    <textarea x-model="submitFilePayload" rows="20" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 font-mono text-sm" placeholder="Enter JSON payload..."></textarea>
+                                </div>
+                                
+                                <div class="flex items-center space-x-4">
+                                    <button type="submit" :disabled="loading" class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 flex items-center space-x-2">
+                                        <svg x-show="loading" class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                        </svg>
+                                        <span>Submit File</span>
+                                    </button>
+                                    <button type="button" @click="loadSamplePayload()" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+                                        Load Sample
+                                    </button>
+                                </div>
+                            </form>
+
+                            <!-- Submit File Response -->
+                            <template x-if="submitFileResponse">
+                                <div class="p-4 rounded-lg" :class="submitFileResponse.error ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'">
+                                    <h3 class="text-sm font-semibold mb-2" :class="submitFileResponse.error ? 'text-red-800' : 'text-green-800'">
+                                        <span x-text="submitFileResponse.error ? 'Submission Failed' : 'File Submitted Successfully'"></span>
+                                    </h3>
+                                    <pre class="text-xs overflow-auto max-h-64 p-2 bg-white rounded" x-text="JSON.stringify(submitFileResponse, null, 2)"></pre>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
             </div>
         </div>
     </main>
@@ -450,6 +580,15 @@
                     serial_number: '',
                     activation_key: ''
                 },
+
+                registrationMode: 'new',
+                
+                uploadForm: {
+                    device_id: '',
+                    serial_number: '',
+                    certificate: '',
+                    private_key: ''
+                },
                 
                 receiptForm: {
                     receiptType: 'FiscalInvoice',
@@ -461,6 +600,10 @@
                     paymentMethod: 'Cash',
                     taxPercent: 15
                 },
+
+                submitFilePayload: '',
+                submitFileResponse: null,
+                deviceStatus: null,
                 
                 async init() {
                     await this.loadConfig();
@@ -492,6 +635,24 @@
                     } catch (e) {
                         console.error('Failed to load fiscal day:', e);
                     }
+                },
+
+                async getDeviceStatus() {
+                    this.loading = true;
+                    this.deviceStatus = null;
+                    try {
+                        const res = await fetch('/zimra/status');
+                        const data = await res.json();
+                        this.deviceStatus = data;
+                        if (res.ok && !data.error) {
+                            this.showMessage('Device status retrieved successfully!', 'success');
+                        } else {
+                            this.showMessage(data.error || 'Failed to get device status', 'error');
+                        }
+                    } catch (e) {
+                        this.showMessage('An error occurred: ' + e.message, 'error');
+                    }
+                    this.loading = false;
                 },
                 
                 async saveConfig() {
@@ -547,6 +708,65 @@
                         }
                     } catch (e) {
                         this.showMessage('An error occurred', 'error');
+                    }
+                    this.loading = false;
+                },
+
+                handleCertificateFile(event) {
+                    const file = event.target.files[0];
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            this.uploadForm.certificate = e.target.result;
+                        };
+                        reader.readAsText(file);
+                    }
+                },
+
+                handlePrivateKeyFile(event) {
+                    const file = event.target.files[0];
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            this.uploadForm.private_key = e.target.result;
+                        };
+                        reader.readAsText(file);
+                    }
+                },
+
+                async uploadCertificates() {
+                    if (!this.uploadForm.device_id || !this.uploadForm.serial_number) {
+                        this.showMessage('Please enter Device ID and Serial Number', 'error');
+                        return;
+                    }
+                    if (!this.uploadForm.certificate || !this.uploadForm.private_key) {
+                        this.showMessage('Please upload both certificate and private key files', 'error');
+                        return;
+                    }
+
+                    this.loading = true;
+                    try {
+                        const res = await fetch('/zimra/upload-certificates', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                            },
+                            body: JSON.stringify(this.uploadForm)
+                        });
+
+                        const data = await res.json();
+
+                        if (res.ok && !data.error) {
+                            this.showMessage('Certificates uploaded successfully!', 'success');
+                            await this.loadConfig();
+                            await this.loadFiscalDay();
+                            this.activeTab = 'fiscal';
+                        } else {
+                            this.showMessage(data.error || data.message || 'Failed to upload certificates', 'error');
+                        }
+                    } catch (e) {
+                        this.showMessage('An error occurred: ' + e.message, 'error');
                     }
                     this.loading = false;
                 },
@@ -685,6 +905,67 @@
                         }
                     } catch (e) {
                         this.showMessage('An error occurred', 'error');
+                    }
+                    this.loading = false;
+                },
+
+                loadSamplePayload() {
+                    const now = new Date();
+                    const isoDate = now.toISOString().slice(0, 19);
+                    this.submitFilePayload = JSON.stringify({
+                        "header": {
+                            "fiscalDayNo": this.fiscalDay?.fiscal_day_no || 1,
+                            "fiscalDayOpened": this.fiscalDay?.opened_at || isoDate,
+                            "fileSequence": 1
+                        },
+                        "content": {
+                            "receipts": []
+                        },
+                        "footer": {
+                            "fiscalDayCounters": this.fiscalDay?.fiscal_counters || [],
+                            "receiptCounter": this.fiscalDay?.receipt_counter || 0,
+                            "fiscalDayClosed": this.fiscalDay?.closed_at || isoDate
+                        }
+                    }, null, 2);
+                },
+
+                async submitFile() {
+                    if (!this.submitFilePayload.trim()) {
+                        this.showMessage('Please enter a JSON payload', 'error');
+                        return;
+                    }
+
+                    let payload;
+                    try {
+                        payload = JSON.parse(this.submitFilePayload);
+                    } catch (e) {
+                        this.showMessage('Invalid JSON payload', 'error');
+                        return;
+                    }
+
+                    this.loading = true;
+                    this.submitFileResponse = null;
+
+                    try {
+                        const res = await fetch('/zimra/submit-file', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                            },
+                            body: JSON.stringify(payload)
+                        });
+
+                        const data = await res.json();
+                        this.submitFileResponse = data;
+
+                        if (res.ok && !data.error) {
+                            this.showMessage('File submitted successfully!', 'success');
+                        } else {
+                            this.showMessage(data.body?.detail || data.message || 'Failed to submit file', 'error');
+                        }
+                    } catch (e) {
+                        this.showMessage('An error occurred: ' + e.message, 'error');
                     }
                     this.loading = false;
                 },

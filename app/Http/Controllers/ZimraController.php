@@ -114,6 +114,36 @@ class ZimraController extends Controller
 
     /*
     |--------------------------------------------------------------------------
+    | Upload Existing Certificates
+    |--------------------------------------------------------------------------
+    */
+    public function uploadCertificates(Request $request, ZimraDeviceService $zimra)
+    {
+        $validated = $request->validate([
+            'device_id' => 'required|integer',
+            'serial_number' => 'required|string',
+            'certificate' => 'required|string',
+            'private_key' => 'required|string',
+        ]);
+
+        try {
+            $result = $zimra->uploadCertificates(
+                $validated['device_id'],
+                $validated['serial_number'],
+                $validated['certificate'],
+                $validated['private_key']
+            );
+
+            return response()->json($result);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Get Device Config (mTLS)
     |--------------------------------------------------------------------------
     */
@@ -198,19 +228,26 @@ class ZimraController extends Controller
     */
     public function fiscalDayStatus(ZimraDeviceService $zimra)
     {
-        $fiscalDay = $zimra->getCurrentFiscalDay();
+        try {
+            $fiscalDay = $zimra->getCurrentFiscalDay();
 
-        if (!$fiscalDay) {
+            if (!$fiscalDay) {
+                return response()->json([
+                    'is_open' => false,
+                    'message' => 'No open fiscal day'
+                ]);
+            }
+
+            return response()->json([
+                'is_open' => true,
+                'fiscal_day' => $fiscalDay
+            ]);
+        } catch (\Exception $e) {
             return response()->json([
                 'is_open' => false,
-                'message' => 'No open fiscal day'
+                'error' => $e->getMessage()
             ]);
         }
-
-        return response()->json([
-            'is_open' => true,
-            'fiscal_day' => $fiscalDay
-        ]);
     }
 
     /*
