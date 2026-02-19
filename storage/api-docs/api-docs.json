@@ -3164,95 +3164,116 @@
                 ]
             }
         },
-        "/zimra/open-day": {
+        "/zimra/config": {
             "get": {
                 "tags": [
                     "ZIMRA Fiscalisation"
                 ],
-                "summary": "Open ZIMRA fiscal day",
-                "description": "Must be called before creating fiscalized transactions",
-                "operationId": "92039c41cecf7ff92aade0390f551fe4",
+                "summary": "Get active ZIMRA configuration",
+                "description": "Retrieve the currently active ZIMRA configuration",
+                "operationId": "5539cd4e21eec099a0e4b55834dadf32",
                 "responses": {
                     "200": {
-                        "description": "Fiscal day opened"
+                        "description": "Active configuration returned"
+                    },
+                    "404": {
+                        "description": "No active configuration found"
                     }
                 },
-                "security": [
-                    {
-                        "AppId": [],
-                        "ApiKey": []
-                    }
-                ],
                 "servers": [
                     {
                         "url": "/api/v1",
                         "description": "Local API Server"
                     }
                 ]
-            }
-        },
-        "/zimra/close-day": {
-            "get": {
-                "tags": [
-                    "ZIMRA Fiscalisation"
-                ],
-                "summary": "Close ZIMRA fiscal day",
-                "description": "Should be called at the end of the business day",
-                "operationId": "bc14644b16fae5986a5a62430d468ff8",
-                "responses": {
-                    "200": {
-                        "description": "Fiscal day closed"
-                    }
-                },
-                "security": [
-                    {
-                        "AppId": [],
-                        "ApiKey": []
-                    }
-                ],
-                "servers": [
-                    {
-                        "url": "/api/v1",
-                        "description": "Local API Server"
-                    }
-                ]
-            }
-        },
-        "/zimra/fiscalize": {
+            },
             "post": {
                 "tags": [
                     "ZIMRA Fiscalisation"
                 ],
-                "summary": "Fiscalize a transaction",
-                "description": "Fiscalize a transaction with ZIMRA based on ZIMRA Fiscal Device Gateway API Specs v7.2",
-                "operationId": "09fa41ec9eba76464591d224b8315587",
+                "summary": "Store ZIMRA configuration",
+                "description": "Store ZIMRA API configuration (base URL, device model, version). Only one active config allowed.",
+                "operationId": "20cb492ebe31bd9fb64adc5e9c0af3cb",
                 "requestBody": {
                     "required": true,
                     "content": {
                         "application/json": {
                             "schema": {
                                 "required": [
-                                    "data",
-                                    "type"
+                                    "base_url",
+                                    "device_model",
+                                    "device_version"
                                 ],
                                 "properties": {
-                                    "data": {
-                                        "properties": {
-                                            "id": {
-                                                "type": "string",
-                                                "example": ""
-                                            }
-                                        },
-                                        "type": "object"
-                                    },
-                                    "type": {
+                                    "base_url": {
                                         "type": "string",
-                                        "enum": [
-                                            "Invoice",
-                                            "Debit Note",
-                                            "Credit Note"
-                                        ],
-                                        "example": "Invoice"
+                                        "example": "https://fdmsapitest.zimra.co.zw"
+                                    },
+                                    "device_model": {
+                                        "type": "string",
+                                        "example": "Server"
+                                    },
+                                    "device_version": {
+                                        "type": "string",
+                                        "example": "v1"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Configuration stored successfully"
+                    },
+                    "400": {
+                        "description": "Validation error"
+                    }
+                },
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/zimra/config/{id}": {
+            "put": {
+                "tags": [
+                    "ZIMRA Fiscalisation"
+                ],
+                "summary": "Update ZIMRA configuration",
+                "description": "Update an existing ZIMRA configuration",
+                "operationId": "d8c0d4706206432a3916d00d5085ae04",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "base_url": {
+                                        "type": "string"
+                                    },
+                                    "device_model": {
+                                        "type": "string"
+                                    },
+                                    "device_version": {
+                                        "type": "string"
+                                    },
+                                    "is_active": {
+                                        "type": "boolean"
                                     }
                                 },
                                 "type": "object"
@@ -3262,15 +3283,203 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Transaction fiscalized"
+                        "description": "Configuration updated"
+                    },
+                    "404": {
+                        "description": "Configuration not found"
                     }
                 },
-                "security": [
+                "servers": [
                     {
-                        "AppId": [],
-                        "ApiKey": []
+                        "url": "/api/v1",
+                        "description": "Local API Server"
                     }
+                ]
+            }
+        },
+        "/zimra/register": {
+            "post": {
+                "tags": [
+                    "ZIMRA Fiscalisation"
                 ],
+                "summary": "Register ZIMRA fiscal device",
+                "description": "Register device with ZIMRA. Generates ECC P-256 private key, CSR, and obtains device certificate.",
+                "operationId": "6f36234f2dca945df475e8cbe663b423",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "device_id",
+                                    "serial_number",
+                                    "activation_key"
+                                ],
+                                "properties": {
+                                    "device_id": {
+                                        "type": "integer",
+                                        "example": 32558
+                                    },
+                                    "serial_number": {
+                                        "type": "string",
+                                        "example": "lotusdream-1"
+                                    },
+                                    "activation_key": {
+                                        "type": "string",
+                                        "example": "00362772"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Device registered successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string"
+                                        },
+                                        "operationID": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Registration failed"
+                    }
+                },
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/zimra/device-config": {
+            "get": {
+                "tags": [
+                    "ZIMRA Fiscalisation"
+                ],
+                "summary": "Get ZIMRA device configuration",
+                "description": "Retrieve device configuration from ZIMRA using mTLS authentication",
+                "operationId": "c794063cc9a0ed8b0daff03b1da31468",
+                "responses": {
+                    "200": {
+                        "description": "Device configuration returned"
+                    },
+                    "400": {
+                        "description": "Error retrieving configuration"
+                    }
+                },
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/zimra/status": {
+            "get": {
+                "tags": [
+                    "ZIMRA Fiscalisation"
+                ],
+                "summary": "Get ZIMRA device status",
+                "description": "Get current fiscal day status from ZIMRA using mTLS authentication",
+                "operationId": "81908a344beac43d3219658a988d0266",
+                "responses": {
+                    "200": {
+                        "description": "Device status returned",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "operationID": {
+                                            "type": "string"
+                                        },
+                                        "fiscalDayStatus": {
+                                            "type": "string",
+                                            "enum": [
+                                                "FiscalDayClosed",
+                                                "FiscalDayOpened"
+                                            ]
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Error retrieving status"
+                    }
+                },
+                "servers": [
+                    {
+                        "url": "/api/v1",
+                        "description": "Local API Server"
+                    }
+                ]
+            }
+        },
+        "/zimra/open-day": {
+            "post": {
+                "tags": [
+                    "ZIMRA Fiscalisation"
+                ],
+                "summary": "Open ZIMRA fiscal day",
+                "description": "Open a new fiscal day with ZIMRA. Datetime is automatically set to current local time. Must be called before creating fiscalized transactions.",
+                "operationId": "8802331154cfc26cc80b5820610eec94",
+                "requestBody": {
+                    "required": false,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "fiscal_day_no": {
+                                        "description": "Fiscal day number (first day = 1, increments daily)",
+                                        "type": "integer",
+                                        "example": 1
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Fiscal day opened",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "operationID": {
+                                            "type": "string"
+                                        },
+                                        "fiscalDayNo": {
+                                            "type": "integer"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Error opening fiscal day"
+                    }
+                },
                 "servers": [
                     {
                         "url": "/api/v1",

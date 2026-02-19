@@ -16,6 +16,7 @@ class ZimraConfig extends Model
         'private_key',
         'certificate',
         'is_active',
+        'reporting_frequency',
     ];
 
     protected $hidden = [
@@ -28,6 +29,7 @@ class ZimraConfig extends Model
         return [
             'is_active' => 'boolean',
             'device_id' => 'integer',
+            'reporting_frequency' => 'integer',
         ];
     }
 

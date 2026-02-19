@@ -354,10 +354,125 @@ This API supports ZIMRA Fiscal Invoices, Credit Notes and Debit Notes based on Z
 #[OA\Get(path: "/quotation/download", summary: "Download quotation as PDF", tags: ["Quotations"], security: [["AppId" => [], "ApiKey" => []]], parameters: [new OA\Parameter(name: "id", in: "query", required: true, schema: new OA\Schema(type: "string"))], responses: [new OA\Response(response: 200, description: "PDF file")])]
 #[OA\Post(path: "/quotation/delete", summary: "Delete quotations", tags: ["Quotations"], security: [["AppId" => [], "ApiKey" => []]], requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ["data"], properties: [new OA\Property(property: "data", type: "array", items: new OA\Items(type: "object", required: ["id"], properties: [new OA\Property(property: "id", type: "string", example: "")]))])), responses: [new OA\Response(response: 200, description: "Success")])]
 
-// ZIMRA Fiscalisation
-#[OA\Get(path: "/zimra/open-day", summary: "Open ZIMRA fiscal day", description: "Must be called before creating fiscalized transactions", tags: ["ZIMRA Fiscalisation"], security: [["AppId" => [], "ApiKey" => []]], responses: [new OA\Response(response: 200, description: "Fiscal day opened")])]
-#[OA\Get(path: "/zimra/close-day", summary: "Close ZIMRA fiscal day", description: "Should be called at the end of the business day", tags: ["ZIMRA Fiscalisation"], security: [["AppId" => [], "ApiKey" => []]], responses: [new OA\Response(response: 200, description: "Fiscal day closed")])]
-#[OA\Post(path: "/zimra/fiscalize", summary: "Fiscalize a transaction", description: "Fiscalize a transaction with ZIMRA based on ZIMRA Fiscal Device Gateway API Specs v7.2", tags: ["ZIMRA Fiscalisation"], security: [["AppId" => [], "ApiKey" => []]], requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ["data", "type"], properties: [new OA\Property(property: "data", type: "object", properties: [new OA\Property(property: "id", type: "string", example: "")]), new OA\Property(property: "type", type: "string", enum: ["Invoice", "Debit Note", "Credit Note"], example: "Invoice")])), responses: [new OA\Response(response: 200, description: "Transaction fiscalized")])]
+// ZIMRA Fiscalisation - Configuration
+#[OA\Post(
+    path: "/zimra/config",
+    summary: "Store ZIMRA configuration",
+    description: "Store ZIMRA API configuration (base URL, device model, version). Only one active config allowed.",
+    tags: ["ZIMRA Fiscalisation"],
+    requestBody: new OA\RequestBody(
+        required: true,
+        content: new OA\JsonContent(
+            required: ["base_url", "device_model", "device_version"],
+            properties: [
+                new OA\Property(property: "base_url", type: "string", example: "https://fdmsapitest.zimra.co.zw"),
+                new OA\Property(property: "device_model", type: "string", example: "Server"),
+                new OA\Property(property: "device_version", type: "string", example: "v1")
+            ]
+        )
+    ),
+    responses: [
+        new OA\Response(response: 201, description: "Configuration stored successfully"),
+        new OA\Response(response: 400, description: "Validation error")
+    ]
+)]
+#[OA\Get(
+    path: "/zimra/config",
+    summary: "Get active ZIMRA configuration",
+    description: "Retrieve the currently active ZIMRA configuration",
+    tags: ["ZIMRA Fiscalisation"],
+    responses: [
+        new OA\Response(response: 200, description: "Active configuration returned"),
+        new OA\Response(response: 404, description: "No active configuration found")
+    ]
+)]
+#[OA\Put(
+    path: "/zimra/config/{id}",
+    summary: "Update ZIMRA configuration",
+    description: "Update an existing ZIMRA configuration",
+    tags: ["ZIMRA Fiscalisation"],
+    parameters: [
+        new OA\Parameter(name: "id", in: "path", required: true, schema: new OA\Schema(type: "integer"))
+    ],
+    requestBody: new OA\RequestBody(
+        required: true,
+        content: new OA\JsonContent(
+            properties: [
+                new OA\Property(property: "base_url", type: "string"),
+                new OA\Property(property: "device_model", type: "string"),
+                new OA\Property(property: "device_version", type: "string"),
+                new OA\Property(property: "is_active", type: "boolean")
+            ]
+        )
+    ),
+    responses: [
+        new OA\Response(response: 200, description: "Configuration updated"),
+        new OA\Response(response: 404, description: "Configuration not found")
+    ]
+)]
+
+// ZIMRA Fiscalisation - Device Registration
+#[OA\Post(
+    path: "/zimra/register",
+    summary: "Register ZIMRA fiscal device",
+    description: "Register device with ZIMRA. Generates ECC P-256 private key, CSR, and obtains device certificate.",
+    tags: ["ZIMRA Fiscalisation"],
+    requestBody: new OA\RequestBody(
+        required: true,
+        content: new OA\JsonContent(
+            required: ["device_id", "serial_number", "activation_key"],
+            properties: [
+                new OA\Property(property: "device_id", type: "integer", example: 32558),
+                new OA\Property(property: "serial_number", type: "string", example: "lotusdream-1"),
+                new OA\Property(property: "activation_key", type: "string", example: "00362772")
+            ]
+        )
+    ),
+    responses: [
+        new OA\Response(response: 200, description: "Device registered successfully", content: new OA\JsonContent(properties: [new OA\Property(property: "message", type: "string"), new OA\Property(property: "operationID", type: "string")])),
+        new OA\Response(response: 400, description: "Registration failed")
+    ]
+)]
+
+// ZIMRA Fiscalisation - Device Operations (mTLS)
+#[OA\Get(
+    path: "/zimra/device-config",
+    summary: "Get ZIMRA device configuration",
+    description: "Retrieve device configuration from ZIMRA using mTLS authentication",
+    tags: ["ZIMRA Fiscalisation"],
+    responses: [
+        new OA\Response(response: 200, description: "Device configuration returned"),
+        new OA\Response(response: 400, description: "Error retrieving configuration")
+    ]
+)]
+#[OA\Get(
+    path: "/zimra/status",
+    summary: "Get ZIMRA device status",
+    description: "Get current fiscal day status from ZIMRA using mTLS authentication",
+    tags: ["ZIMRA Fiscalisation"],
+    responses: [
+        new OA\Response(response: 200, description: "Device status returned", content: new OA\JsonContent(properties: [new OA\Property(property: "operationID", type: "string"), new OA\Property(property: "fiscalDayStatus", type: "string", enum: ["FiscalDayClosed", "FiscalDayOpened"])])),
+        new OA\Response(response: 400, description: "Error retrieving status")
+    ]
+)]
+#[OA\Post(
+    path: "/zimra/open-day",
+    summary: "Open ZIMRA fiscal day",
+    description: "Open a new fiscal day with ZIMRA. Datetime is automatically set to current local time. Must be called before creating fiscalized transactions.",
+    tags: ["ZIMRA Fiscalisation"],
+    requestBody: new OA\RequestBody(
+        required: false,
+        content: new OA\JsonContent(
+            properties: [
+                new OA\Property(property: "fiscal_day_no", type: "integer", example: 1, description: "Fiscal day number (first day = 1, increments daily)")
+            ]
+        )
+    ),
+    responses: [
+        new OA\Response(response: 200, description: "Fiscal day opened", content: new OA\JsonContent(properties: [new OA\Property(property: "operationID", type: "string"), new OA\Property(property: "fiscalDayNo", type: "integer")])),
+        new OA\Response(response: 400, description: "Error opening fiscal day")
+    ]
+)]
 class OpenApiSpec
 {
     // This class exists only to hold OpenAPI annotations

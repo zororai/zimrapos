@@ -15,3 +15,7 @@ Route::put('/zimra/config/{id}', [ZimraController::class, 'updateConfig']);
 // ZIMRA Device Routes
 Route::post('/zimra/register', [ZimraController::class, 'register']);
 Route::get('/zimra/device-config', [ZimraController::class, 'config']);
+Route::get('/zimra/status', [ZimraController::class, 'status']);
+Route::post('/zimra/open-day', [ZimraController::class, 'openDay']);
+Route::post('/zimra/close-day', [ZimraController::class, 'closeDay']);
+Route::get('/zimra/fiscal-day', [ZimraController::class, 'fiscalDayStatus']);

@@ -127,4 +127,89 @@ class ZimraController extends Controller
             ], 400);
         }
     }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Get Device Status (mTLS)
+    |--------------------------------------------------------------------------
+    */
+    public function status(ZimraDeviceService $zimra)
+    {
+        try {
+            return response()->json($zimra->getStatus());
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Open Fiscal Day (mTLS)
+    |--------------------------------------------------------------------------
+    */
+    public function openDay(Request $request, ZimraDeviceService $zimra)
+    {
+        $fiscalDayNo = $request->input('fiscal_day_no');
+
+        try {
+            $result = $zimra->openDay($fiscalDayNo);
+            
+            if (isset($result['error']) && $result['error']) {
+                return response()->json($result, 400);
+            }
+            
+            return response()->json($result);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Close Fiscal Day
+    |--------------------------------------------------------------------------
+    */
+    public function closeDay(Request $request, ZimraDeviceService $zimra)
+    {
+        try {
+            $payload = $request->all();
+            $result = $zimra->closeDay(empty($payload) ? null : $payload);
+            
+            if (isset($result['error']) && $result['error']) {
+                return response()->json($result, 400);
+            }
+            
+            return response()->json($result);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Get Current Fiscal Day Status
+    |--------------------------------------------------------------------------
+    */
+    public function fiscalDayStatus(ZimraDeviceService $zimra)
+    {
+        $fiscalDay = $zimra->getCurrentFiscalDay();
+
+        if (!$fiscalDay) {
+            return response()->json([
+                'is_open' => false,
+                'message' => 'No open fiscal day'
+            ]);
+        }
+
+        return response()->json([
+            'is_open' => true,
+            'fiscal_day' => $fiscalDay
+        ]);
+    }
 }
