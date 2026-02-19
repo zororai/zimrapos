@@ -403,6 +403,11 @@
                         </button>
                     </div>
                     
+                    <!-- Debug: Show fiscal day data -->
+                    <div class="mb-4 p-3 bg-gray-100 rounded text-xs overflow-x-auto">
+                        <strong>Debug fiscalDay:</strong> <pre x-text="JSON.stringify(fiscalDay, null, 2)" class="whitespace-pre-wrap"></pre>
+                    </div>
+
                     <template x-if="!fiscalDay || !fiscalDay.is_open">
                         <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800">
                             Please open a fiscal day first before submitting receipts.
@@ -629,11 +634,15 @@
                 async loadFiscalDay() {
                     try {
                         const res = await fetch('/zimra/fiscal-day');
-                        if (res.ok) {
-                            this.fiscalDay = await res.json();
+                        const data = await res.json();
+                        console.log('Fiscal day response:', data);
+                        this.fiscalDay = data;
+                        if (data.is_open) {
+                            this.showMessage('Fiscal day #' + (data.fiscal_day?.fiscal_day_no || '?') + ' is open', 'success');
                         }
                     } catch (e) {
                         console.error('Failed to load fiscal day:', e);
+                        this.showMessage('Failed to load fiscal day: ' + e.message, 'error');
                     }
                 },
 
