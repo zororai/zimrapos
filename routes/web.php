@@ -7,6 +7,10 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+Route::get('/zimra', function () {
+    return view('zimra');
+});
+
 // ZIMRA Configuration Routes
 Route::post('/zimra/config', [ZimraController::class, 'storeConfig']);
 Route::get('/zimra/config', [ZimraController::class, 'getActiveConfig']);

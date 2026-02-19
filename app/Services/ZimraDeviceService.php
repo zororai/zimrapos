@@ -26,14 +26,41 @@ class ZimraDeviceService
         | 1️⃣ Generate ECC P-256 Private Key
         |--------------------------------------------------------------------------
         */
+        // Find OpenSSL config file for Windows compatibility
+        $opensslConf = $this->findOpenSSLConfig();
+        
+        Log::info('Starting device registration', [
+            'device_id' => $deviceId,
+            'serial_number' => $serialNumber,
+            'openssl_conf' => $opensslConf,
+            'php_binary' => PHP_BINARY
+        ]);
+        
         $config = [
             "private_key_type" => OPENSSL_KEYTYPE_EC,
             "curve_name" => "prime256v1",
         ];
+        
+        if ($opensslConf) {
+            $config["config"] = $opensslConf;
+        }
 
         $privateKeyResource = openssl_pkey_new($config);
 
-        openssl_pkey_export($privateKeyResource, $privateKeyPem);
+        if ($privateKeyResource === false) {
+            $errors = [];
+            while ($e = openssl_error_string()) {
+                $errors[] = $e;
+            }
+            Log::error('OpenSSL key generation failed', ['errors' => $errors]);
+            throw new \Exception('Failed to generate private key. OpenSSL errors: ' . implode('; ', $errors));
+        }
+
+        if (!openssl_pkey_export($privateKeyResource, $privateKeyPem, null, $opensslConf ? ['config' => $opensslConf] : [])) {
+            $error = openssl_error_string();
+            Log::error('OpenSSL key export failed', ['error' => $error]);
+            throw new \Exception('Failed to export private key: ' . ($error ?: 'Unknown error'));
+        }
 
         Storage::put("zimra/device_private.key", $privateKeyPem);
 
@@ -48,11 +75,27 @@ class ZimraDeviceService
             "commonName" => $commonName,
         ];
 
-        $csrResource = openssl_csr_new($dn, $privateKeyResource, [
-            "digest_alg" => "sha256"
-        ]);
+        $csrConfig = ["digest_alg" => "sha256"];
+        if ($opensslConf) {
+            $csrConfig["config"] = $opensslConf;
+        }
 
-        openssl_csr_export($csrResource, $csrPem);
+        $csrResource = openssl_csr_new($dn, $privateKeyResource, $csrConfig);
+
+        if ($csrResource === false) {
+            $errors = [];
+            while ($e = openssl_error_string()) {
+                $errors[] = $e;
+            }
+            Log::error('OpenSSL CSR generation failed', ['errors' => $errors]);
+            throw new \Exception('Failed to generate CSR. OpenSSL errors: ' . implode('; ', $errors));
+        }
+
+        if (!openssl_csr_export($csrResource, $csrPem)) {
+            $error = openssl_error_string();
+            Log::error('OpenSSL CSR export failed', ['error' => $error]);
+            throw new \Exception('Failed to export CSR: ' . ($error ?: 'Unknown error'));
+        }
 
         Storage::put("zimra/device.csr", $csrPem);
 
@@ -704,5 +747,73 @@ class ZimraDeviceService
         Log::info('ZIMRA File Submitted', $response->json() ?? []);
 
         return $response->json();
+    }
+
+    /**
+     * Find OpenSSL configuration file for Windows compatibility
+     */
+    private function findOpenSSLConfig(): ?string
+    {
+        // Check environment variable first
+        if ($conf = getenv('OPENSSL_CONF')) {
+            if (file_exists($conf)) {
+                return $conf;
+            }
+        }
+
+        // Common locations for OpenSSL config on Windows (Herd, XAMPP, etc.)
+        $userProfile = getenv('USERPROFILE') ?: 'C:/Users/' . get_current_user();
+        $phpDir = dirname(PHP_BINARY);
+        
+        $possiblePaths = [
+            // Herd locations (various possible paths)
+            $userProfile . '/.config/herd/bin/openssl.cnf',
+            $userProfile . '/AppData/Local/Herd/bin/openssl.cnf',
+            $userProfile . '/AppData/Roaming/Herd/bin/openssl.cnf',
+            'C:/Program Files/Herd/resources/bin/openssl.cnf',
+            'C:/Program Files/Herd/bin/openssl.cnf',
+            getenv('HERD_HOME') . '/bin/openssl.cnf',
+            // PHP binary directory (Herd embeds PHP)
+            $phpDir . '/extras/ssl/openssl.cnf',
+            $phpDir . '/ssl/openssl.cnf',
+            $phpDir . '/../ssl/openssl.cnf',
+            $phpDir . '/extras/openssl/openssl.cnf',
+            // XAMPP
+            'C:/xampp/apache/conf/openssl.cnf',
+            'C:/xampp/php/extras/ssl/openssl.cnf',
+            // Git for Windows
+            'C:/Program Files/Git/usr/ssl/openssl.cnf',
+            'C:/Program Files/Git/mingw64/ssl/openssl.cnf',
+            // Standard Windows locations
+            'C:/OpenSSL-Win64/bin/openssl.cfg',
+            'C:/OpenSSL/bin/openssl.cfg',
+        ];
+        
+        Log::debug('Looking for OpenSSL config', ['php_binary' => PHP_BINARY, 'php_dir' => $phpDir]);
+
+        foreach ($possiblePaths as $path) {
+            if ($path && file_exists($path)) {
+                return $path;
+            }
+        }
+
+        // Try to find via PHP's openssl extension
+        $opensslDir = null;
+        if (defined('OPENSSL_VERSION_TEXT')) {
+            // Check common relative paths from PHP
+            $phpDir = dirname(PHP_BINARY);
+            $checkPaths = [
+                $phpDir . '/extras/ssl/openssl.cnf',
+                $phpDir . '/../ssl/openssl.cnf',
+                $phpDir . '/ssl/openssl.cnf',
+            ];
+            foreach ($checkPaths as $path) {
+                if (file_exists($path)) {
+                    return realpath($path);
+                }
+            }
+        }
+
+        return null;
     }
 }
