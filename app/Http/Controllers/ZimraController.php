@@ -6,6 +6,7 @@ use App\Models\Receipt;
 use App\Models\ZimraConfig;
 use App\Services\ZimraDeviceService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class ZimraController extends Controller
@@ -112,6 +113,18 @@ class ZimraController extends Controller
         
         // Activate this one
         $config->update(['is_active' => true]);
+        
+        // Write certificates to file system for mTLS (if registered)
+        if ($config->certificate && $config->private_key) {
+            Storage::put('zimra/device_certificate.pem', $config->certificate);
+            Storage::put('zimra/device_private.key', $config->private_key);
+            
+            Log::info('Switched to company config', [
+                'config_id' => $config->id,
+                'company_name' => $config->company_name,
+                'device_id' => $config->device_id,
+            ]);
+        }
 
         return response()->json([
             'message' => 'Configuration activated successfully',
@@ -235,10 +248,16 @@ class ZimraController extends Controller
                 $validated['activation_key']
             );
 
+            // Check if the result contains an error
+            if (isset($result['error']) && $result['error']) {
+                return response()->json($result, 400);
+            }
+
             return response()->json($result);
         } catch (\Exception $e) {
             return response()->json([
-                'error' => $e->getMessage(),
+                'error' => true,
+                'message' => $e->getMessage(),
             ], 400);
         }
     }

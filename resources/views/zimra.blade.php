@@ -27,13 +27,24 @@
                     </div>
                 </div>
                 <div class="flex items-center space-x-4">
+                    <!-- Active Company Badge -->
+                    <template x-if="config">
+                        <div class="flex items-center space-x-2 px-3 py-1.5 bg-green-100 border border-green-300 rounded-lg">
+                            <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                            </svg>
+                            <span class="text-sm font-semibold text-green-700" x-text="config.company_name"></span>
+                            <span x-show="config.device_id" class="text-xs text-green-600" x-text="'(#' + config.device_id + ')'"></span>
+                        </div>
+                    </template>
+                    
                     <!-- Company Selector -->
                     <div class="flex items-center space-x-2">
-                        <label class="text-sm font-medium text-gray-600">Company:</label>
+                        <label class="text-sm font-medium text-gray-600">Switch:</label>
                         <select x-model="selectedConfigId" @change="switchCompany()" class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
                             <option value="">-- Select Company --</option>
                             <template x-for="c in allConfigs" :key="c.id">
-                                <option :value="c.id" x-text="c.company_name + (c.device_id ? ' (Device: ' + c.device_id + ')' : ' (Not Registered)')"></option>
+                                <option :value="c.id" x-text="c.company_name + (c.device_id ? ' (#' + c.device_id + ')' : ' (Not Registered)')"></option>
                             </template>
                         </select>
                     </div>
@@ -194,22 +205,64 @@
                         </div>
                     </form>
 
+                    <!-- All Registered Companies -->
+                    <template x-if="allConfigs.length > 0">
+                        <div class="mt-8">
+                            <h3 class="text-sm font-semibold text-gray-700 mb-3">All Registered Companies</h3>
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full text-sm border border-gray-200 rounded-lg">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th class="px-4 py-2 text-left font-medium text-gray-600">Company Name</th>
+                                            <th class="px-4 py-2 text-left font-medium text-gray-600">TIN</th>
+                                            <th class="px-4 py-2 text-left font-medium text-gray-600">Device ID</th>
+                                            <th class="px-4 py-2 text-left font-medium text-gray-600">Status</th>
+                                            <th class="px-4 py-2 text-center font-medium text-gray-600">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <template x-for="c in allConfigs" :key="c.id">
+                                            <tr class="border-t border-gray-100" :class="c.is_active ? 'bg-green-50' : ''">
+                                                <td class="px-4 py-2 font-medium" x-text="c.company_name"></td>
+                                                <td class="px-4 py-2 text-gray-600" x-text="c.company_tin || '-'"></td>
+                                                <td class="px-4 py-2" x-text="c.device_id || 'Not registered'"></td>
+                                                <td class="px-4 py-2">
+                                                    <span x-show="c.is_active" class="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded">Active</span>
+                                                    <span x-show="!c.is_active" class="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs font-medium rounded">Inactive</span>
+                                                </td>
+                                                <td class="px-4 py-2 text-center">
+                                                    <button x-show="!c.is_active" @click="selectedConfigId = c.id; switchCompany()" class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">
+                                                        Select
+                                                    </button>
+                                                    <span x-show="c.is_active" class="text-xs text-green-600 font-medium">Current</span>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Current Active Configuration Details -->
                     <template x-if="config">
-                        <div class="mt-8 p-4 bg-gray-50 rounded-lg">
+                        <div class="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
                             <div class="flex items-center justify-between mb-3">
-                                <h3 class="text-sm font-semibold text-gray-700">Current Configuration</h3>
+                                <h3 class="text-sm font-semibold text-green-700">Active Company Details</h3>
                                 <button @click="deleteConfig()" :disabled="loading" class="px-3 py-1 bg-red-600 text-white text-sm font-medium rounded hover:bg-red-700 disabled:opacity-50 flex items-center space-x-1">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                                     </svg>
-                                    <span>Delete Configuration</span>
+                                    <span>Delete</span>
                                 </button>
                             </div>
-                            <div class="grid grid-cols-2 gap-4 text-sm">
-                                <div><span class="text-gray-500">Base URL:</span> <span class="font-medium" x-text="config.base_url"></span></div>
-                                <div><span class="text-gray-500">Device Model:</span> <span class="font-medium" x-text="config.device_model"></span></div>
-                                <div><span class="text-gray-500">Device Version:</span> <span class="font-medium" x-text="config.device_version"></span></div>
+                            <div class="grid grid-cols-3 gap-4 text-sm">
+                                <div><span class="text-gray-500">Company:</span> <span class="font-medium text-green-700" x-text="config.company_name"></span></div>
+                                <div><span class="text-gray-500">TIN:</span> <span class="font-medium" x-text="config.company_tin || 'N/A'"></span></div>
                                 <div><span class="text-gray-500">Device ID:</span> <span class="font-medium" x-text="config.device_id || 'Not registered'"></span></div>
+                                <div><span class="text-gray-500">Base URL:</span> <span class="font-medium" x-text="config.base_url"></span></div>
+                                <div><span class="text-gray-500">Model:</span> <span class="font-medium" x-text="config.device_model"></span></div>
+                                <div><span class="text-gray-500">Version:</span> <span class="font-medium" x-text="config.device_version"></span></div>
                             </div>
                         </div>
                     </template>
@@ -217,11 +270,21 @@
 
                 <!-- Device Registration Tab -->
                 <div x-show="activeTab === 'device'" x-cloak>
-                    <h2 class="text-lg font-semibold text-gray-900 mb-4">Device Registration</h2>
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold text-gray-900">Device Registration</h2>
+                        <template x-if="config">
+                            <div class="flex items-center space-x-2 px-3 py-1 bg-blue-100 border border-blue-300 rounded-lg">
+                                <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                                </svg>
+                                <span class="text-sm font-medium text-blue-700" x-text="'Registering for: ' + config.company_name"></span>
+                            </div>
+                        </template>
+                    </div>
                     
                     <template x-if="!config">
                         <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800">
-                            Please configure ZIMRA settings first before registering a device.
+                            Please add a company first in Configuration tab, then select it from the dropdown above.
                         </div>
                     </template>
 
@@ -383,11 +446,21 @@
 
                 <!-- Fiscal Day Tab -->
                 <div x-show="activeTab === 'fiscal'" x-cloak>
-                    <h2 class="text-lg font-semibold text-gray-900 mb-4">Fiscal Day Management</h2>
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold text-gray-900">Fiscal Day Management</h2>
+                        <template x-if="config">
+                            <div class="flex items-center space-x-2 px-3 py-1 bg-blue-100 border border-blue-300 rounded-lg">
+                                <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                                </svg>
+                                <span class="text-sm font-medium text-blue-700" x-text="'Using: ' + config.company_name"></span>
+                            </div>
+                        </template>
+                    </div>
                     
                     <template x-if="!config?.device_id">
                         <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800">
-                            Please register a device first before managing fiscal days.
+                            Please register a device first before managing fiscal days. Select a company from the dropdown above.
                         </div>
                     </template>
 
@@ -474,7 +547,17 @@
                 <!-- Submit Receipt Tab -->
                 <div x-show="activeTab === 'receipts'" x-cloak x-init="loadFiscalDay()">
                     <div class="flex items-center justify-between mb-4">
-                        <h2 class="text-lg font-semibold text-gray-900">Submit Receipt</h2>
+                        <div class="flex items-center space-x-4">
+                            <h2 class="text-lg font-semibold text-gray-900">Submit Receipt</h2>
+                            <template x-if="config">
+                                <div class="flex items-center space-x-2 px-3 py-1 bg-blue-100 border border-blue-300 rounded-lg">
+                                    <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                                    </svg>
+                                    <span class="text-sm font-medium text-blue-700" x-text="'Using: ' + config.company_name"></span>
+                                </div>
+                            </template>
+                        </div>
                         <button @click="loadFiscalDay()" class="text-sm text-green-600 hover:text-green-700 flex items-center space-x-1">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
@@ -811,10 +894,60 @@
                 receipts: [],
                 
                 async init() {
+                    await this.loadAllConfigs();
                     await this.loadConfig();
                     await this.loadFiscalDay();
                     await this.loadNextInvoiceNo();
                     await this.loadReceipts();
+                },
+
+                async loadAllConfigs() {
+                    try {
+                        const res = await fetch('/zimra/configs');
+                        if (res.ok) {
+                            this.allConfigs = await res.json();
+                            // Set selected config to active one
+                            const activeConfig = this.allConfigs.find(c => c.is_active);
+                            if (activeConfig) {
+                                this.selectedConfigId = activeConfig.id;
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Failed to load configs:', e);
+                    }
+                },
+
+                async switchCompany() {
+                    if (!this.selectedConfigId) {
+                        this.config = null;
+                        this.fiscalDay = null;
+                        this.receipts = [];
+                        return;
+                    }
+                    
+                    this.loading = true;
+                    try {
+                        // Activate the selected config
+                        const res = await fetch(`/zimra/config/${this.selectedConfigId}/activate`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                            }
+                        });
+                        
+                        if (res.ok) {
+                            await this.loadConfig();
+                            await this.loadFiscalDay();
+                            await this.loadReceipts();
+                            await this.loadNextInvoiceNo();
+                            this.showMessage('Switched to ' + (this.config?.company_name || 'selected company'), 'success');
+                        }
+                    } catch (e) {
+                        this.showMessage('Failed to switch company: ' + e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
                 },
                 
                 async loadReceipts() {
@@ -930,8 +1063,12 @@
                         const data = await res.json();
                         
                         if (res.ok) {
-                            this.showMessage('Configuration saved successfully!', 'success');
+                            this.showMessage('Company added successfully!', 'success');
+                            await this.loadAllConfigs();
                             await this.loadConfig();
+                            // Clear form for next entry
+                            this.configForm.company_name = '';
+                            this.configForm.company_tin = '';
                         } else {
                             this.showMessage(data.message || 'Failed to save configuration', 'error');
                         }
@@ -957,14 +1094,20 @@
                         
                         if (res.ok && !data.error) {
                             this.showMessage('Device registered successfully!', 'success');
+                            await this.loadAllConfigs();
                             await this.loadConfig();
                             await this.loadFiscalDay();
                             this.activeTab = 'fiscal';
                         } else {
-                            this.showMessage(data.error || data.message || 'Failed to register device', 'error');
+                            // Build detailed error message
+                            let errorMsg = data.message || 'Failed to register device';
+                            if (data.errorCode) {
+                                errorMsg = `[${data.errorCode}] ${errorMsg}`;
+                            }
+                            this.showMessage(errorMsg, 'error');
                         }
                     } catch (e) {
-                        this.showMessage('An error occurred', 'error');
+                        this.showMessage('An error occurred: ' + e.message, 'error');
                     }
                     this.loading = false;
                 },
@@ -1016,6 +1159,7 @@
 
                         if (res.ok && !data.error) {
                             this.showMessage('Certificates uploaded successfully!', 'success');
+                            await this.loadAllConfigs();
                             await this.loadConfig();
                             await this.loadFiscalDay();
                             this.activeTab = 'fiscal';
@@ -1221,11 +1365,10 @@
                         if (res.ok && !data.error) {
                             this.showMessage('Receipt submitted successfully!', 'success');
                             this.lastReceiptResponse = data;
-                            await this.loadFiscalDay();
-                            await this.loadReceipts();
-                            // Reset form and load next invoice number from backend
-                            await this.loadNextInvoiceNo();
-                            this.receiptForm.receiptLines = [{ receiptLineName: '', receiptLineQuantity: 1, receiptLinePrice: 0, receiptLineHSCode: '' }];
+                            // Reload page after short delay to show success message
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 1500);
                         } else {
                             this.showMessage(data.error || data.message || 'Failed to submit receipt', 'error');
                         }
@@ -1327,9 +1470,16 @@
                         if (res.ok) {
                             this.showMessage('Configuration deleted successfully!', 'success');
                             this.config = null;
-                            this.configForm = { base_url: '', device_model: '', device_version: '' };
+                            this.selectedConfigId = '';
+                            this.configForm = { company_name: '', company_tin: '', base_url: 'https://fdmsapitest.zimra.co.zw', device_model: 'Server', device_version: 'v1' };
                             this.fiscalDay = null;
                             this.deviceStatus = null;
+                            await this.loadAllConfigs();
+                            // If there are still configs, select the first one
+                            if (this.allConfigs.length > 0) {
+                                this.selectedConfigId = this.allConfigs[0].id;
+                                await this.switchCompany();
+                            }
                         } else {
                             this.showMessage(data.message || 'Failed to delete configuration', 'error');
                         }
