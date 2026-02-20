@@ -31,6 +31,8 @@ class Receipt extends Model
         'validation_code',
         'validation_errors',
         'is_valid',
+        'has_red_errors',
+        'has_gray_errors',
         'fdms_receipt_id',
     ];
 
@@ -46,5 +48,7 @@ class Receipt extends Model
         'tax_amount' => 'decimal:2',
         'tax_percent' => 'decimal:2',
         'is_valid' => 'boolean',
+        'has_red_errors' => 'boolean',
+        'has_gray_errors' => 'boolean',
     ];
 }

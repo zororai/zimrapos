@@ -476,13 +476,57 @@ class ZimraController extends Controller
 
     /*
     |--------------------------------------------------------------------------
-    | Get All Receipts
+    | Get All Receipts (filtered by current device)
     |--------------------------------------------------------------------------
     */
     public function getReceipts()
     {
-        $receipts = Receipt::orderBy('created_at', 'desc')->limit(50)->get();
+        $config = ZimraConfig::getActive();
+        
+        if (!$config || !$config->device_id) {
+            return response()->json([]);
+        }
+
+        $receipts = Receipt::where('device_id', $config->device_id)
+            ->orderBy('created_at', 'desc')
+            ->limit(50)
+            ->get();
+            
         return response()->json($receipts);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Get Next Invoice Number (for current device)
+    |--------------------------------------------------------------------------
+    */
+    public function getNextInvoiceNo()
+    {
+        $config = ZimraConfig::getActive();
+        
+        if (!$config || !$config->device_id) {
+            return response()->json(['invoice_no' => 'INV-001']);
+        }
+
+        // Get the last invoice number for this device
+        $lastReceipt = Receipt::where('device_id', $config->device_id)
+            ->orderBy('id', 'desc')
+            ->first();
+
+        if (!$lastReceipt || !$lastReceipt->invoice_no) {
+            return response()->json(['invoice_no' => 'INV-001']);
+        }
+
+        // Extract number from invoice_no (e.g., "INV-005" -> 5)
+        $matches = [];
+        if (preg_match('/INV-(\d+)/', $lastReceipt->invoice_no, $matches)) {
+            $nextNumber = (int) $matches[1] + 1;
+            return response()->json([
+                'invoice_no' => 'INV-' . str_pad($nextNumber, 3, '0', STR_PAD_LEFT)
+            ]);
+        }
+
+        return response()->json(['invoice_no' => 'INV-001']);
     }
 
     /*

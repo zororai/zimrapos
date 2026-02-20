@@ -31,6 +31,7 @@ Route::post('/zimra/submit-receipt', [ZimraController::class, 'submitReceipt']);
 Route::post('/zimra/submit-file', [ZimraController::class, 'submitFile']);
 Route::get('/zimra/receipts', [ZimraController::class, 'getReceipts']);
 Route::get('/zimra/receipts/{id}/pdf', [ZimraController::class, 'downloadReceiptPdf']);
+Route::get('/zimra/next-invoice-no', [ZimraController::class, 'getNextInvoiceNo']);
 
 // Test Route
 Route::get('/test-zimra', [\App\Http\Controllers\ZimraTestController::class, 'test']);

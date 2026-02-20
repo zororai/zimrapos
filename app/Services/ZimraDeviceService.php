@@ -767,28 +767,9 @@ class ZimraDeviceService
             Storage::put('zimra/device_private.key', $zimraConfig->private_key);
         }
 
-        // Build payload from database if not provided
+        // Build payload dynamically from stored receipts
         if (!$payload) {
-            // Filter counters: remove zero values and fix structure per ZIMRA FDMS v7.2
-            $rawCounters = $fiscalDay->fiscal_counters ?? [];
-            $filteredCounters = [];
-            foreach ($rawCounters as $counter) {
-                // Skip zero value counters
-                if (empty($counter['fiscalCounterValue']) || $counter['fiscalCounterValue'] == 0) {
-                    continue;
-                }
-                // For SaleByTax: remove fiscalCounterMoneyType (not allowed per spec)
-                if (isset($counter['fiscalCounterType']) && strtolower($counter['fiscalCounterType']) === 'salebytax') {
-                    unset($counter['fiscalCounterMoneyType']);
-                }
-                $filteredCounters[] = $counter;
-            }
-
-            $payload = [
-                'fiscalDayNo' => $fiscalDay->fiscal_day_no,
-                'fiscalDayCounters' => $filteredCounters,
-                'receiptCounter' => $fiscalDay->receipt_counter ?? 0,
-            ];
+            $payload = $this->buildCloseDayPayload($fiscalDay, $deviceId);
         }
 
         // DEBUG: Log payload before signing
@@ -913,6 +894,246 @@ class ZimraDeviceService
 
     /*
     |--------------------------------------------------------------------------
+    | Build CloseDay Payload from Stored Receipts
+    |--------------------------------------------------------------------------
+    | Calculates fiscalDayCounters dynamically from receipts table.
+    | Validates totals match before returning payload.
+    |--------------------------------------------------------------------------
+    */
+    private function buildCloseDayPayload(FiscalDay $fiscalDay, int $deviceId): array
+    {
+        // Get all valid receipts for this fiscal day
+        $receipts = Receipt::where('device_id', $deviceId)
+            ->where('fiscal_day_no', $fiscalDay->fiscal_day_no)
+            ->where('is_valid', true)
+            ->get();
+
+        Log::info('CloseDay - Building payload from receipts', [
+            'fiscal_day_no' => $fiscalDay->fiscal_day_no,
+            'receipt_count' => $receipts->count(),
+        ]);
+
+        /*
+        |--------------------------------------------------------------------------
+        | Check for Red or Gray errors - Block CloseDay if found
+        |--------------------------------------------------------------------------
+        */
+        $receiptsWithRedErrors = Receipt::where('device_id', $deviceId)
+            ->where('fiscal_day_no', $fiscalDay->fiscal_day_no)
+            ->where('has_red_errors', true)
+            ->get();
+
+        $receiptsWithGrayErrors = Receipt::where('device_id', $deviceId)
+            ->where('fiscal_day_no', $fiscalDay->fiscal_day_no)
+            ->where('has_gray_errors', true)
+            ->get();
+
+        if ($receiptsWithRedErrors->isNotEmpty()) {
+            $errorIds = $receiptsWithRedErrors->pluck('id')->implode(', ');
+            Log::error('CloseDay - Blocked due to RED validation errors', [
+                'fiscal_day_no' => $fiscalDay->fiscal_day_no,
+                'receipt_ids_with_red_errors' => $errorIds,
+            ]);
+            throw new \Exception(
+                "Cannot close fiscal day: {$receiptsWithRedErrors->count()} receipt(s) have RED validation errors. " .
+                "Receipt IDs: {$errorIds}"
+            );
+        }
+
+        if ($receiptsWithGrayErrors->isNotEmpty()) {
+            $errorIds = $receiptsWithGrayErrors->pluck('id')->implode(', ');
+            Log::error('CloseDay - Blocked due to GRAY validation errors', [
+                'fiscal_day_no' => $fiscalDay->fiscal_day_no,
+                'receipt_ids_with_gray_errors' => $errorIds,
+            ]);
+            throw new \Exception(
+                "Cannot close fiscal day: {$receiptsWithGrayErrors->count()} receipt(s) have GRAY validation errors. " .
+                "Receipt IDs: {$errorIds}"
+            );
+        }
+
+        if ($receipts->isEmpty()) {
+            Log::warning('CloseDay - No valid receipts found for fiscal day', [
+                'fiscal_day_no' => $fiscalDay->fiscal_day_no,
+            ]);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | 1️⃣ Calculate receiptCounter (last receipt counter for this day)
+        |--------------------------------------------------------------------------
+        */
+        $lastReceipt = $receipts->sortByDesc('receipt_counter')->first();
+        $receiptCounter = $lastReceipt ? $lastReceipt->receipt_counter : 0;
+
+        Log::debug('CloseDay - Receipt counter from last receipt', [
+            'receipt_counter' => $receiptCounter,
+            'last_receipt_id' => $lastReceipt?->id,
+        ]);
+
+        /*
+        |--------------------------------------------------------------------------
+        | 2️⃣ Calculate fiscalDayCounters from receipts
+        |--------------------------------------------------------------------------
+        | Group by: taxID, taxPercent, paymentMethod (moneyType)
+        |--------------------------------------------------------------------------
+        */
+        $counters = [];
+        $totalReceiptValue = 0;
+
+        foreach ($receipts as $receipt) {
+            $receiptTaxes = $receipt->receipt_taxes ?? [];
+            $receiptPayments = $receipt->receipt_payments ?? [];
+            $receiptTotal = (float) $receipt->receipt_total;
+            $currency = $receipt->receipt_currency ?? 'USD';
+
+            $totalReceiptValue += $receiptTotal;
+
+            // Process each tax group in the receipt
+            foreach ($receiptTaxes as $tax) {
+                $taxCode = $tax['taxCode'] ?? 'A';
+                $taxPercent = (float) ($tax['taxPercent'] ?? 0);
+                $taxID = (int) ($tax['taxID'] ?? 1);
+                $salesAmountWithTax = (float) ($tax['salesAmountWithTax'] ?? 0);
+
+                // SaleByTax counter (no moneyType per ZIMRA spec)
+                $taxKey = "SaleByTax_{$taxID}_{$taxPercent}";
+                if (!isset($counters[$taxKey])) {
+                    $counters[$taxKey] = [
+                        'fiscalCounterType' => 'SaleByTax',
+                        'fiscalCounterCurrency' => $currency,
+                        'fiscalCounterTaxPercent' => $taxPercent,
+                        'fiscalCounterTaxID' => $taxID,
+                        'fiscalCounterValue' => 0,
+                    ];
+                }
+                $counters[$taxKey]['fiscalCounterValue'] += $salesAmountWithTax;
+            }
+
+            // Process each payment method
+            foreach ($receiptPayments as $payment) {
+                $moneyType = $payment['moneyTypeCode'] ?? 'Cash';
+                $paymentAmount = (float) ($payment['paymentAmount'] ?? 0);
+
+                // SaleByMoneyType counter
+                $paymentKey = "SaleByMoneyType_{$moneyType}";
+                if (!isset($counters[$paymentKey])) {
+                    $counters[$paymentKey] = [
+                        'fiscalCounterType' => 'SaleByMoneyType',
+                        'fiscalCounterCurrency' => $currency,
+                        'fiscalCounterMoneyType' => $moneyType,
+                        'fiscalCounterValue' => 0,
+                    ];
+                }
+                $counters[$paymentKey]['fiscalCounterValue'] += $paymentAmount;
+            }
+        }
+
+        // Round all counter values
+        foreach ($counters as &$counter) {
+            $counter['fiscalCounterValue'] = round($counter['fiscalCounterValue'], 2);
+        }
+        unset($counter);
+
+        // Filter out zero-value counters
+        $filteredCounters = array_filter($counters, function ($c) {
+            return $c['fiscalCounterValue'] > 0;
+        });
+
+        $fiscalDayCounters = array_values($filteredCounters);
+
+        /*
+        |--------------------------------------------------------------------------
+        | 3️⃣ Validate Totals
+        |--------------------------------------------------------------------------
+        */
+        $totalSalesByTax = 0;
+        $totalSalesByMoney = 0;
+
+        foreach ($fiscalDayCounters as $counter) {
+            if ($counter['fiscalCounterType'] === 'SaleByTax') {
+                $totalSalesByTax += $counter['fiscalCounterValue'];
+            }
+            if ($counter['fiscalCounterType'] === 'SaleByMoneyType') {
+                $totalSalesByMoney += $counter['fiscalCounterValue'];
+            }
+        }
+
+        $totalSalesByTax = round($totalSalesByTax, 2);
+        $totalSalesByMoney = round($totalSalesByMoney, 2);
+        $totalReceiptValue = round($totalReceiptValue, 2);
+
+        Log::info('CloseDay - Payload validation', [
+            'receipt_counter' => $receiptCounter,
+            'total_receipt_value' => $totalReceiptValue,
+            'total_sales_by_tax' => $totalSalesByTax,
+            'total_sales_by_money' => $totalSalesByMoney,
+            'counter_count' => count($fiscalDayCounters),
+        ]);
+
+        // Log each counter for debugging
+        foreach ($fiscalDayCounters as $index => $counter) {
+            Log::debug("CloseDay - Counter #{$index}", [
+                'type' => $counter['fiscalCounterType'],
+                'value' => $counter['fiscalCounterValue'],
+                'taxID' => $counter['fiscalCounterTaxID'] ?? null,
+                'taxPercent' => $counter['fiscalCounterTaxPercent'] ?? null,
+                'moneyType' => $counter['fiscalCounterMoneyType'] ?? null,
+            ]);
+        }
+
+        // Validate: SalesByTax should equal total receipt value
+        if (abs($totalSalesByTax - $totalReceiptValue) > 0.01) {
+            Log::error('CloseDay - SalesByTax mismatch', [
+                'total_sales_by_tax' => $totalSalesByTax,
+                'total_receipt_value' => $totalReceiptValue,
+                'difference' => $totalSalesByTax - $totalReceiptValue,
+            ]);
+            throw new \Exception(
+                "CloseDay validation failed: SalesByTax ({$totalSalesByTax}) != totalReceiptValue ({$totalReceiptValue})"
+            );
+        }
+
+        // Validate: SalesByMoney should equal total receipt value
+        if (abs($totalSalesByMoney - $totalReceiptValue) > 0.01) {
+            Log::error('CloseDay - SalesByMoney mismatch', [
+                'total_sales_by_money' => $totalSalesByMoney,
+                'total_receipt_value' => $totalReceiptValue,
+                'difference' => $totalSalesByMoney - $totalReceiptValue,
+            ]);
+            throw new \Exception(
+                "CloseDay validation failed: SalesByMoney ({$totalSalesByMoney}) != totalReceiptValue ({$totalReceiptValue})"
+            );
+        }
+
+        // Validate: receiptCounter should match receipt count or be > 0
+        if ($receiptCounter <= 0 && $receipts->isNotEmpty()) {
+            Log::error('CloseDay - Invalid receipt counter', [
+                'receipt_counter' => $receiptCounter,
+                'receipt_count' => $receipts->count(),
+            ]);
+            throw new \Exception(
+                "CloseDay validation failed: receiptCounter ({$receiptCounter}) is invalid"
+            );
+        }
+
+        $payload = [
+            'fiscalDayNo' => $fiscalDay->fiscal_day_no,
+            'fiscalDayCounters' => $fiscalDayCounters,
+            'receiptCounter' => $receiptCounter,
+        ];
+
+        Log::info('CloseDay - Final payload built', [
+            'fiscal_day_no' => $payload['fiscalDayNo'],
+            'receipt_counter' => $payload['receiptCounter'],
+            'counter_count' => count($payload['fiscalDayCounters']),
+        ]);
+
+        return $payload;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Force Close Fiscal Day (Local Only - No ZIMRA API call)
     |--------------------------------------------------------------------------
     | Use this when ZIMRA API fails and you need to manually close the day
@@ -1028,62 +1249,98 @@ class ZimraDeviceService
 
         /*
         |--------------------------------------------------------------------------
-        | 1️⃣ Build & Validate Receipt with Tax Calculations
+        | 1️⃣ Get Tax Configuration from FDMS (GetConfig)
         |--------------------------------------------------------------------------
         */
-        $receiptData = $this->buildAndValidateReceipt($receiptData, $fiscalDay);
+        $fdmsTaxes = $this->getFdmsTaxConfig($zimraConfig);
+        
+        Log::info('ZIMRA SubmitReceipt - Tax Config from FDMS', [
+            'taxes' => $fdmsTaxes,
+        ]);
 
         /*
         |--------------------------------------------------------------------------
-        | 2️⃣ Generate Device Signature
+        | 2️⃣ Validate Invoice Number Uniqueness
         |--------------------------------------------------------------------------
         */
+        $invoiceNo = $receiptData['invoiceNo'] ?? null;
+        if ($invoiceNo) {
+            $existingReceipt = Receipt::where('device_id', $deviceId)
+                ->where('invoice_no', $invoiceNo)
+                ->first();
+            
+            if ($existingReceipt) {
+                throw new \Exception(
+                    "Invoice number '{$invoiceNo}' already exists for this device. Use a unique invoice number."
+                );
+            }
+        }
 
+        /*
+        |--------------------------------------------------------------------------
+        | 3️⃣ Get Correct Receipt Counter from Database
+        |--------------------------------------------------------------------------
+        */
+        $lastReceipt = Receipt::where('device_id', $deviceId)
+            ->where('fiscal_day_no', $fiscalDay->fiscal_day_no)
+            ->orderBy('receipt_counter', 'desc')
+            ->first();
+        
+        $lastReceiptCounter = $lastReceipt ? (int) $lastReceipt->receipt_counter : 0;
+        $nextReceiptCounter = $lastReceiptCounter + 1;
+
+        // Get global counter (across all fiscal days for this device)
+        $lastGlobalReceipt = Receipt::where('device_id', $deviceId)
+            ->orderBy('receipt_global_no', 'desc')
+            ->first();
+        $lastGlobalNo = $lastGlobalReceipt ? (int) $lastGlobalReceipt->receipt_global_no : 0;
+        $nextGlobalNo = $lastGlobalNo + 1;
+
+        Log::info('ZIMRA SubmitReceipt - Counter Calculation', [
+            'last_receipt_counter' => $lastReceiptCounter,
+            'next_receipt_counter' => $nextReceiptCounter,
+            'last_global_no' => $lastGlobalNo,
+            'next_global_no' => $nextGlobalNo,
+            'fiscal_day_no' => $fiscalDay->fiscal_day_no,
+        ]);
+
+        // Override counters with calculated values
+        $receiptData['receiptCounter'] = $nextReceiptCounter;
+        $receiptData['receiptGlobalNo'] = $nextGlobalNo;
+
+        /*
+        |--------------------------------------------------------------------------
+        | 4️⃣ Build & Validate Receipt with Tax Calculations (using FDMS taxes)
+        |--------------------------------------------------------------------------
+        */
+        $receiptData = $this->buildAndValidateReceipt($receiptData, $fiscalDay, $fdmsTaxes);
+
+        /*
+        |--------------------------------------------------------------------------
+        | 5️⃣ Generate Device Signature (FDMS Spec Section 13.2)
+        |--------------------------------------------------------------------------
+        */
         // Remove existing signature if present
         unset($receiptData['receiptDeviceSignature']);
 
         // Set fiscal day number from current open day
         $receiptData['fiscalDayNo'] = $fiscalDay->fiscal_day_no;
 
-        $receiptJson = json_encode($receiptData, JSON_UNESCAPED_SLASHES);
-
-        // Generate SHA256 hash (binary)
-        $hashBinary = hash('sha256', $receiptJson, true);
-
-        // Base64 encoded hash
-        $hashBase64 = base64_encode($hashBinary);
-
-        // Load private key
-        $privateKeyPath = storage_path('app/zimra/device_private.key');
-        $privateKey = openssl_pkey_get_private(file_get_contents($privateKeyPath));
-
-        if (!$privateKey) {
-            throw new \Exception('Failed to load private key for signing.');
-        }
-
-        // Sign hash with ECDSA
-        openssl_sign($receiptJson, $signatureBinary, $privateKey, OPENSSL_ALGO_SHA256);
-
-        $signatureBase64 = base64_encode($signatureBinary);
-
-        // Add signature to receipt
-        $receiptData['receiptDeviceSignature'] = [
-            'hash' => $hashBase64,
-            'signature' => $signatureBase64,
-        ];
+        // Generate signature with canonical field ordering per FDMS spec
+        $receiptData['receiptDeviceSignature'] = $this->signReceiptData($receiptData);
 
         /*
         |--------------------------------------------------------------------------
-        | 3️⃣ Send To ZIMRA
+        | 6️⃣ Send To ZIMRA
         |--------------------------------------------------------------------------
         */
-
         Log::info('ZIMRA SubmitReceipt Request', [
             'device_id' => $deviceId,
             'fiscal_day_no' => $fiscalDay->fiscal_day_no,
-            'receipt_counter' => $receiptData['receiptCounter'] ?? null,
-            'receipt_global_no' => $receiptData['receiptGlobalNo'] ?? null,
-            'receipt_total' => $receiptData['receiptTotal'] ?? null,
+            'receipt_counter' => $receiptData['receiptCounter'],
+            'receipt_global_no' => $receiptData['receiptGlobalNo'],
+            'receipt_total' => $receiptData['receiptTotal'],
+            'invoice_no' => $receiptData['invoiceNo'] ?? 'N/A',
             'tax_inclusive' => $receiptData['receiptLinesTaxInclusive'] ?? false,
         ]);
 
@@ -1101,7 +1358,7 @@ class ZimraDeviceService
 
         /*
         |--------------------------------------------------------------------------
-        | 4️⃣ Log Full Raw FDMS Response
+        | 7️⃣ Log Full Raw FDMS Response
         |--------------------------------------------------------------------------
         */
         $rawResponseBody = $response->body();
@@ -1134,35 +1391,72 @@ class ZimraDeviceService
 
         /*
         |--------------------------------------------------------------------------
-        | 5️⃣ Check for Validation Errors
+        | 8️⃣ Parse Validation Errors (validationErrorCode + validationErrorColor)
         |--------------------------------------------------------------------------
         */
         $validationErrors = $responseData['validationErrors'] ?? [];
-        $receiptValidationCode = $responseData['receiptValidationCode'] ?? null;
         $fdmsReceiptId = $responseData['receiptID'] ?? null;
-        $isValid = empty($validationErrors) && !in_array($receiptValidationCode, ['Grey', 'Red']);
-
-        // Log each validation error individually
+        
+        // Parse validation error codes and colors, track flags
+        $hasRedErrors = false;
+        $hasGrayErrors = false;
+        $parsedErrors = [];
+        
         if (!empty($validationErrors)) {
-            Log::error('ZIMRA Receipt Validation Errors Detected', [
-                'receipt_id' => $fdmsReceiptId,
-                'validation_code' => $receiptValidationCode,
-                'error_count' => count($validationErrors)
-            ]);
-
-            foreach ($validationErrors as $index => $error) {
-                Log::error("ZIMRA Validation Error #{$index}", [
-                    'errorCode' => $error['errorCode'] ?? 'UNKNOWN',
-                    'errorMessage' => $error['errorMessage'] ?? $error['message'] ?? 'No message',
+            foreach ($validationErrors as $error) {
+                $errorCode = $error['validationErrorCode'] ?? $error['errorCode'] ?? null;
+                $errorColor = $error['validationErrorColor'] ?? null;
+                $errorMessage = $error['errorMessage'] ?? $error['message'] ?? 'No message';
+                
+                // Track error color flags
+                if ($errorColor === 'Red') {
+                    $hasRedErrors = true;
+                } elseif ($errorColor === 'Gray' || $errorColor === 'Grey') {
+                    $hasGrayErrors = true;
+                }
+                
+                // Store parsed error with normalized structure
+                $parsedErrors[] = [
+                    'validationErrorCode' => $errorCode,
+                    'validationErrorColor' => $errorColor,
+                    'errorMessage' => $errorMessage,
+                    'field' => $error['field'] ?? null,
+                ];
+                
+                Log::error('ZIMRA Validation Error', [
+                    'validationErrorCode' => $errorCode,
+                    'validationErrorColor' => $errorColor,
+                    'errorMessage' => $errorMessage,
                     'field' => $error['field'] ?? null,
                     'receipt_id' => $fdmsReceiptId,
                 ]);
             }
         }
 
+        // Also check top-level validation code
+        $receiptValidationCode = $responseData['receiptValidationCode'] ?? 'Green';
+        
+        // Set flags based on top-level code if not already set
+        if ($receiptValidationCode === 'Red') {
+            $hasRedErrors = true;
+        } elseif ($receiptValidationCode === 'Gray' || $receiptValidationCode === 'Grey') {
+            $hasGrayErrors = true;
+        }
+        
+        $isValid = !$hasRedErrors && !$hasGrayErrors && empty($validationErrors);
+
+        Log::info('ZIMRA SubmitReceipt Validation Result', [
+            'receipt_id' => $fdmsReceiptId,
+            'receiptValidationCode' => $receiptValidationCode,
+            'has_red_errors' => $hasRedErrors,
+            'has_gray_errors' => $hasGrayErrors,
+            'error_count' => count($parsedErrors),
+            'is_valid' => $isValid,
+        ]);
+
         /*
         |--------------------------------------------------------------------------
-        | 6️⃣ Save Receipt with Validation Status to Database
+        | 9️⃣ Save Receipt with Validation Status to Database
         |--------------------------------------------------------------------------
         */
         $primaryTax = $receiptData['receiptTaxes'][0] ?? [];
@@ -1188,8 +1482,10 @@ class ZimraDeviceService
             'zimra_response' => $responseData,
             'receipt_date' => $receiptData['receiptDate'] ?? now(),
             'validation_code' => $receiptValidationCode,
-            'validation_errors' => $validationErrors,
+            'validation_errors' => $parsedErrors,
             'is_valid' => $isValid,
+            'has_red_errors' => $hasRedErrors,
+            'has_gray_errors' => $hasGrayErrors,
             'fdms_receipt_id' => $fdmsReceiptId,
         ]);
 
@@ -1197,42 +1493,54 @@ class ZimraDeviceService
             'receipt_id' => $receipt->id,
             'fdms_receipt_id' => $fdmsReceiptId,
             'is_valid' => $isValid,
+            'has_red_errors' => $hasRedErrors,
+            'has_gray_errors' => $hasGrayErrors,
             'validation_code' => $receiptValidationCode,
         ]);
 
         /*
         |--------------------------------------------------------------------------
-        | 7️⃣ Throw Exception if Validation Errors Exist (Block CloseDay)
+        | 🔟 Throw Exception if Red or Gray errors (Block CloseDay)
         |--------------------------------------------------------------------------
         */
-        if (!empty($validationErrors)) {
-            $errorSummary = collect($validationErrors)->map(function ($e) {
-                return ($e['errorCode'] ?? 'UNKNOWN') . ': ' . ($e['errorMessage'] ?? $e['message'] ?? 'No message');
+        if ($hasRedErrors) {
+            $errorSummary = collect($parsedErrors)->map(function ($e) {
+                $code = $e['validationErrorCode'] ?? 'UNKNOWN';
+                $msg = $e['errorMessage'] ?? 'No message';
+                return "{$code}: {$msg}";
             })->implode('; ');
 
-            Log::error('ZIMRA Receipt Invalid - CloseDay Blocked', [
+            Log::error('ZIMRA Receipt RED Validation - CloseDay Blocked', [
                 'receipt_id' => $fdmsReceiptId,
                 'validation_code' => $receiptValidationCode,
+                'has_red_errors' => $hasRedErrors,
                 'error_summary' => $errorSummary,
                 'db_receipt_id' => $receipt->id,
             ]);
 
             throw new \Exception(
-                "ZIMRA Receipt Validation Failed [{$receiptValidationCode}]: {$errorSummary}. " .
+                "ZIMRA Receipt Validation Failed [RED]: {$errorSummary}. " .
                 "Receipt saved to database (ID: {$receipt->id}). CloseDay will fail with this receipt."
             );
         }
 
-        // Also throw if Grey or Red even without explicit errors
-        if ($receiptValidationCode === 'Grey' || $receiptValidationCode === 'Red') {
-            Log::error('ZIMRA Receipt Marked Invalid (Grey/Red)', [
+        if ($hasGrayErrors) {
+            $errorSummary = collect($parsedErrors)->map(function ($e) {
+                $code = $e['validationErrorCode'] ?? 'UNKNOWN';
+                $msg = $e['errorMessage'] ?? 'No message';
+                return "{$code}: {$msg}";
+            })->implode('; ');
+
+            Log::warning('ZIMRA Receipt GRAY Validation - CloseDay Blocked', [
                 'receipt_id' => $fdmsReceiptId,
                 'validation_code' => $receiptValidationCode,
+                'has_gray_errors' => $hasGrayErrors,
+                'error_summary' => $errorSummary,
                 'db_receipt_id' => $receipt->id,
             ]);
 
             throw new \Exception(
-                "ZIMRA Receipt marked as {$receiptValidationCode}. " .
+                "ZIMRA Receipt Validation Warning [GRAY]: {$errorSummary}. " .
                 "Receipt saved to database (ID: {$receipt->id}). CloseDay will fail with this receipt."
             );
         }
@@ -1264,23 +1572,272 @@ class ZimraDeviceService
 
     /*
     |--------------------------------------------------------------------------
+    | Get Tax Configuration from FDMS
+    |--------------------------------------------------------------------------
+    */
+    private function getFdmsTaxConfig(ZimraConfig $zimraConfig): array
+    {
+        // First check if we have cached taxes in config
+        if (!empty($zimraConfig->taxes)) {
+            Log::debug('Using cached FDMS tax config', ['taxes' => $zimraConfig->taxes]);
+            return $zimraConfig->taxes;
+        }
+
+        // Otherwise fetch from FDMS
+        try {
+            $configResponse = $this->getConfig($zimraConfig->device_id);
+            
+            if (isset($configResponse['taxes']) && is_array($configResponse['taxes'])) {
+                Log::info('Fetched FDMS tax config', ['taxes' => $configResponse['taxes']]);
+                return $configResponse['taxes'];
+            }
+        } catch (\Exception $e) {
+            Log::warning('Failed to fetch FDMS tax config, using defaults', [
+                'error' => $e->getMessage()
+            ]);
+        }
+
+        // Default tax configuration if FDMS unavailable
+        return [
+            [
+                'taxID' => 1,
+                'taxCode' => 'A',
+                'taxPercent' => 15.0,
+                'taxName' => 'VAT Standard',
+            ]
+        ];
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Sign Receipt Data per FDMS Spec Section 13.2
+    |--------------------------------------------------------------------------
+    | Creates canonical JSON with ordered fields, SHA256 hash, ECDSA signature
+    |--------------------------------------------------------------------------
+    */
+    private function signReceiptData(array $receiptData): array
+    {
+        // Build canonical receipt data with ordered fields per FDMS spec section 13.2
+        $canonicalReceipt = $this->buildCanonicalReceiptForSigning($receiptData);
+        
+        // JSON encode with consistent formatting
+        $json = json_encode($canonicalReceipt, JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
+
+        Log::debug('ZIMRA signReceiptData - Canonical JSON', [
+            'json' => $json,
+            'json_length' => strlen($json),
+        ]);
+
+        // SHA256 hash
+        $hashBinary = hash('sha256', $json, true);
+        $hashBase64 = base64_encode($hashBinary);
+
+        Log::debug('ZIMRA signReceiptData - Hash', [
+            'hash_hex' => bin2hex($hashBinary),
+            'hash_base64' => $hashBase64,
+        ]);
+
+        // Load private key
+        $privateKeyPath = storage_path('app/zimra/device_private.key');
+        
+        if (!file_exists($privateKeyPath)) {
+            throw new \Exception('Device private key not found. Please register device first.');
+        }
+
+        $privateKey = openssl_pkey_get_private(file_get_contents($privateKeyPath));
+
+        if (!$privateKey) {
+            throw new \Exception('Failed to load private key for signing.');
+        }
+
+        // Sign with ECDSA (prime256v1) using SHA256
+        openssl_sign($json, $signatureBinary, $privateKey, OPENSSL_ALGO_SHA256);
+        $signatureBase64 = base64_encode($signatureBinary);
+
+        Log::debug('ZIMRA signReceiptData - Signature', [
+            'signature_base64' => $signatureBase64,
+            'signature_length' => strlen($signatureBinary),
+        ]);
+
+        // Verify signature locally
+        $certPath = storage_path('app/zimra/device_certificate.pem');
+        if (file_exists($certPath)) {
+            $cert = openssl_x509_read(file_get_contents($certPath));
+            if ($cert) {
+                $publicKey = openssl_pkey_get_public($cert);
+                $verifyResult = openssl_verify($json, $signatureBinary, $publicKey, OPENSSL_ALGO_SHA256);
+                Log::debug('ZIMRA signReceiptData - Local Verification', [
+                    'valid' => $verifyResult === 1,
+                ]);
+            }
+        }
+
+        return [
+            'hash' => $hashBase64,
+            'signature' => $signatureBase64,
+        ];
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Build Canonical Receipt for Signing (FDMS Spec Section 13.2)
+    |--------------------------------------------------------------------------
+    | Orders fields in the exact sequence required by FDMS for hash consistency
+    |--------------------------------------------------------------------------
+    */
+    private function buildCanonicalReceiptForSigning(array $receiptData): array
+    {
+        // Canonical field order per FDMS spec section 13.2
+        $canonical = [];
+
+        // Required fields in order
+        $fieldOrder = [
+            'receiptType',
+            'receiptCurrency',
+            'receiptCounter',
+            'receiptGlobalNo',
+            'invoiceNo',
+            'buyerData',
+            'receiptNotes',
+            'receiptDate',
+            'creditDebitNote',
+            'receiptLinesTaxInclusive',
+            'receiptLines',
+            'receiptTaxes',
+            'receiptPayments',
+            'receiptTotal',
+            'receiptPrintForm',
+            'fiscalDayNo',
+        ];
+
+        foreach ($fieldOrder as $field) {
+            if (array_key_exists($field, $receiptData)) {
+                $value = $receiptData[$field];
+                
+                // Handle nested arrays (receiptLines, receiptTaxes, receiptPayments)
+                if ($field === 'receiptLines' && is_array($value)) {
+                    $canonical[$field] = $this->canonicalizeReceiptLines($value);
+                } elseif ($field === 'receiptTaxes' && is_array($value)) {
+                    $canonical[$field] = $this->canonicalizeReceiptTaxes($value);
+                } elseif ($field === 'receiptPayments' && is_array($value)) {
+                    $canonical[$field] = $this->canonicalizeReceiptPayments($value);
+                } elseif ($field === 'buyerData' && is_array($value)) {
+                    $canonical[$field] = $this->canonicalizeBuyerData($value);
+                } else {
+                    $canonical[$field] = $value;
+                }
+            }
+        }
+
+        return $canonical;
+    }
+
+    private function canonicalizeReceiptLines(array $lines): array
+    {
+        $result = [];
+        $lineOrder = [
+            'receiptLineNo',
+            'receiptLineType',
+            'receiptLineName',
+            'receiptLineQuantity',
+            'receiptLinePrice',
+            'receiptLineTotal',
+            'taxCode',
+            'taxPercent',
+            'taxID',
+            'receiptLineHSCode',
+        ];
+
+        foreach ($lines as $line) {
+            $canonicalLine = [];
+            foreach ($lineOrder as $field) {
+                if (array_key_exists($field, $line)) {
+                    $canonicalLine[$field] = $line[$field];
+                }
+            }
+            $result[] = $canonicalLine;
+        }
+        return $result;
+    }
+
+    private function canonicalizeReceiptTaxes(array $taxes): array
+    {
+        $result = [];
+        $taxOrder = ['taxCode', 'taxPercent', 'taxID', 'taxAmount', 'salesAmountWithTax'];
+
+        foreach ($taxes as $tax) {
+            $canonicalTax = [];
+            foreach ($taxOrder as $field) {
+                if (array_key_exists($field, $tax)) {
+                    $canonicalTax[$field] = $tax[$field];
+                }
+            }
+            $result[] = $canonicalTax;
+        }
+        return $result;
+    }
+
+    private function canonicalizeReceiptPayments(array $payments): array
+    {
+        $result = [];
+        $paymentOrder = ['moneyTypeCode', 'paymentAmount'];
+
+        foreach ($payments as $payment) {
+            $canonicalPayment = [];
+            foreach ($paymentOrder as $field) {
+                if (array_key_exists($field, $payment)) {
+                    $canonicalPayment[$field] = $payment[$field];
+                }
+            }
+            $result[] = $canonicalPayment;
+        }
+        return $result;
+    }
+
+    private function canonicalizeBuyerData(array $buyerData): array
+    {
+        $buyerOrder = ['buyerRegisterName', 'buyerTradeName', 'vatNumber', 'buyerTIN', 'buyerContacts', 'buyerAddress'];
+        $canonical = [];
+        foreach ($buyerOrder as $field) {
+            if (array_key_exists($field, $buyerData)) {
+                $canonical[$field] = $buyerData[$field];
+            }
+        }
+        return $canonical;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Build & Validate Receipt with Tax Calculations
     |--------------------------------------------------------------------------
     | Handles tax-inclusive vs tax-exclusive calculations per ZIMRA spec.
     | Default: receiptLinesTaxInclusive = false
     |--------------------------------------------------------------------------
     */
-    private function buildAndValidateReceipt(array $receiptData, FiscalDay $fiscalDay): array
+    private function buildAndValidateReceipt(array $receiptData, FiscalDay $fiscalDay, array $fdmsTaxes = []): array
     {
         // Default to tax-exclusive unless explicitly set
         $taxInclusive = $receiptData['receiptLinesTaxInclusive'] ?? false;
         $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
 
-        Log::debug('Receipt Tax Mode', ['tax_inclusive' => $taxInclusive]);
+        // Build tax lookup from FDMS config
+        $taxLookup = [];
+        foreach ($fdmsTaxes as $tax) {
+            $code = $tax['taxCode'] ?? 'A';
+            $taxLookup[$code] = [
+                'taxID' => $tax['taxID'] ?? 1,
+                'taxPercent' => (float) ($tax['taxPercent'] ?? 0),
+            ];
+        }
+
+        Log::debug('Receipt Tax Mode', [
+            'tax_inclusive' => $taxInclusive,
+            'fdms_tax_lookup' => $taxLookup,
+        ]);
 
         /*
         |--------------------------------------------------------------------------
-        | Calculate Line Totals & Taxes
+        | Calculate Line Totals & Taxes (using FDMS taxID)
         |--------------------------------------------------------------------------
         */
         $receiptLines = $receiptData['receiptLines'] ?? [];
@@ -1290,9 +1847,16 @@ class ZimraDeviceService
         foreach ($receiptLines as $index => &$line) {
             $price = (float) ($line['receiptLinePrice'] ?? 0);
             $quantity = (float) ($line['receiptLineQuantity'] ?? 1);
-            $taxPercent = (float) ($line['taxPercent'] ?? 0);
             $taxCode = $line['taxCode'] ?? 'A';
-            $taxID = $line['taxID'] ?? 1;
+            
+            // Get taxID and taxPercent from FDMS config, not hardcoded
+            $fdmsTax = $taxLookup[$taxCode] ?? ['taxID' => 1, 'taxPercent' => 15.0];
+            $taxID = $line['taxID'] ?? $fdmsTax['taxID'];
+            $taxPercent = (float) ($line['taxPercent'] ?? $fdmsTax['taxPercent']);
+            
+            // Update line with correct taxID from FDMS
+            $line['taxID'] = $taxID;
+            $line['taxPercent'] = $taxPercent;
 
             if ($taxInclusive) {
                 // receiptLineTotal already includes tax

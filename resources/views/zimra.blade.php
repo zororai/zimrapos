@@ -738,7 +738,7 @@
                 async init() {
                     await this.loadConfig();
                     await this.loadFiscalDay();
-                    this.generateInvoiceNo();
+                    await this.loadNextInvoiceNo();
                     await this.loadReceipts();
                 },
                 
@@ -753,10 +753,17 @@
                     }
                 },
                 
-                generateInvoiceNo() {
-                    let counter = parseInt(localStorage.getItem('zimra_invoice_counter') || '0') + 1;
-                    localStorage.setItem('zimra_invoice_counter', counter.toString());
-                    this.receiptForm.invoiceNo = 'INV-' + counter.toString().padStart(3, '0');
+                async loadNextInvoiceNo() {
+                    try {
+                        const res = await fetch('/zimra/next-invoice-no');
+                        if (res.ok) {
+                            const data = await res.json();
+                            this.receiptForm.invoiceNo = data.invoice_no || 'INV-001';
+                        }
+                    } catch (e) {
+                        console.error('Failed to load next invoice number:', e);
+                        this.receiptForm.invoiceNo = 'INV-001';
+                    }
                 },
                 
                 async loadConfig() {
@@ -1137,8 +1144,8 @@
                             this.lastReceiptResponse = data;
                             await this.loadFiscalDay();
                             await this.loadReceipts();
-                            // Reset form and generate next invoice number
-                            this.generateInvoiceNo();
+                            // Reset form and load next invoice number from backend
+                            await this.loadNextInvoiceNo();
                             this.receiptForm.receiptLines = [{ receiptLineName: '', receiptLineQuantity: 1, receiptLinePrice: 0, receiptLineHSCode: '' }];
                         } else {
                             this.showMessage(data.error || data.message || 'Failed to submit receipt', 'error');
