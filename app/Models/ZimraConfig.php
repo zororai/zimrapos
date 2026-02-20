@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 class ZimraConfig extends Model
 {
     protected $fillable = [
+        'company_name',
+        'company_tin',
         'base_url',
         'device_model',
         'device_version',

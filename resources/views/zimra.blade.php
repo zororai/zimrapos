@@ -26,12 +26,24 @@
                         <p class="text-sm text-gray-500">Fiscal Device Management System</p>
                     </div>
                 </div>
-                <a href="/" class="text-sm text-gray-600 hover:text-gray-900 flex items-center space-x-1">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
-                    </svg>
-                    <span>Back to Home</span>
-                </a>
+                <div class="flex items-center space-x-4">
+                    <!-- Company Selector -->
+                    <div class="flex items-center space-x-2">
+                        <label class="text-sm font-medium text-gray-600">Company:</label>
+                        <select x-model="selectedConfigId" @change="switchCompany()" class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                            <option value="">-- Select Company --</option>
+                            <template x-for="c in allConfigs" :key="c.id">
+                                <option :value="c.id" x-text="c.company_name + (c.device_id ? ' (Device: ' + c.device_id + ')' : ' (Not Registered)')"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <a href="/" class="text-sm text-gray-600 hover:text-gray-900 flex items-center space-x-1">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+                        </svg>
+                        <span>Back to Home</span>
+                    </a>
+                </div>
             </div>
         </div>
     </header>
@@ -147,6 +159,16 @@
                     <h2 class="text-lg font-semibold text-gray-900 mb-4">ZIMRA Configuration</h2>
                     
                     <form @submit.prevent="saveConfig()" class="space-y-4 max-w-xl">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Company Name *</label>
+                                <input type="text" x-model="configForm.company_name" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="My Company Ltd" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Company TIN</label>
+                                <input type="text" x-model="configForm.company_tin" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="1234567890">
+                            </div>
+                        </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Base URL</label>
                             <input type="url" x-model="configForm.base_url" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="https://fdmsapitest.zimra.co.zw" required>
@@ -167,7 +189,7 @@
                                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                                 </svg>
-                                <span x-text="config ? 'Update Configuration' : 'Save Configuration'"></span>
+                                <span>Add New Company</span>
                             </button>
                         </div>
                     </form>
@@ -603,29 +625,77 @@
                                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
                                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tax</th>
                                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Payment</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody class="bg-white divide-y divide-gray-200">
                                             <template x-for="receipt in receipts" :key="receipt.id">
-                                                <tr>
+                                                <tr :class="{ 'bg-red-50': receipt.has_red_errors, 'bg-yellow-50': receipt.has_gray_errors && !receipt.has_red_errors }">
                                                     <td class="px-4 py-3 text-sm font-medium text-gray-900" x-text="receipt.invoice_no"></td>
                                                     <td class="px-4 py-3 text-sm text-gray-500" x-text="new Date(receipt.receipt_date).toLocaleDateString()"></td>
                                                     <td class="px-4 py-3 text-sm text-gray-900" x-text="receipt.receipt_currency + ' ' + parseFloat(receipt.receipt_total).toFixed(2)"></td>
                                                     <td class="px-4 py-3 text-sm text-gray-500" x-text="receipt.tax_code + ' (' + receipt.tax_percent + '%)'"></td>
                                                     <td class="px-4 py-3 text-sm text-gray-500" x-text="receipt.payment_method"></td>
                                                     <td class="px-4 py-3 text-sm">
-                                                        <a :href="'/zimra/receipts/' + receipt.id + '/pdf'" target="_blank" class="text-green-600 hover:text-green-800">
-                                                            <svg class="w-5 h-5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                                                            </svg>
-                                                            PDF
-                                                        </a>
+                                                        <template x-if="receipt.has_red_errors">
+                                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                                                RED Error
+                                                            </span>
+                                                        </template>
+                                                        <template x-if="receipt.has_gray_errors && !receipt.has_red_errors">
+                                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                                                GRAY Warning
+                                                            </span>
+                                                        </template>
+                                                        <template x-if="receipt.is_valid && !receipt.has_red_errors && !receipt.has_gray_errors">
+                                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                                Valid
+                                                            </span>
+                                                        </template>
+                                                    </td>
+                                                    <td class="px-4 py-3 text-sm">
+                                                        <div class="flex items-center space-x-2">
+                                                            <a :href="'/zimra/receipts/' + receipt.id + '/pdf'" target="_blank" class="text-green-600 hover:text-green-800">
+                                                                <svg class="w-5 h-5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                                                </svg>
+                                                            </a>
+                                                            <template x-if="receipt.validation_errors && receipt.validation_errors.length > 0">
+                                                                <button @click="showValidationErrors(receipt)" class="text-gray-500 hover:text-gray-700">
+                                                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                                                    </svg>
+                                                                </button>
+                                                            </template>
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             </template>
                                         </tbody>
                                     </table>
+                                    
+                                    <!-- Validation Errors Modal -->
+                                    <div x-show="selectedReceiptErrors" x-cloak class="fixed inset-0 z-50 overflow-y-auto" @keydown.escape.window="selectedReceiptErrors = null">
+                                        <div class="flex items-center justify-center min-h-screen px-4">
+                                            <div class="fixed inset-0 bg-gray-500 bg-opacity-75" @click="selectedReceiptErrors = null"></div>
+                                            <div class="relative bg-white rounded-lg shadow-xl max-w-lg w-full p-6">
+                                                <h3 class="text-lg font-semibold text-gray-900 mb-4">Validation Errors</h3>
+                                                <div class="space-y-3 max-h-96 overflow-y-auto">
+                                                    <template x-for="(error, index) in selectedReceiptErrors" :key="index">
+                                                        <div :class="error.validationErrorColor === 'Red' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-yellow-50 border-yellow-200 text-yellow-800'" class="p-3 border rounded-lg">
+                                                            <div class="font-medium" x-text="error.validationErrorCode || 'Unknown Error'"></div>
+                                                            <div class="text-sm mt-1" x-text="error.errorMessage"></div>
+                                                            <div x-show="error.field" class="text-xs mt-1 opacity-75">Field: <span x-text="error.field"></span></div>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                                <button @click="selectedReceiptErrors = null" class="mt-4 w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">
+                                                    Close
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -693,11 +763,16 @@
                 message: '',
                 messageType: 'success',
                 config: null,
+                allConfigs: [],
+                selectedConfigId: '',
                 fiscalDay: null,
                 closeDayFailed: false,
                 lastReceiptResponse: null,
+                selectedReceiptErrors: null,
                 
                 configForm: {
+                    company_name: '',
+                    company_tin: '',
                     base_url: 'https://fdmsapitest.zimra.co.zw',
                     device_model: 'Server',
                     device_version: 'v1'
@@ -751,6 +826,10 @@
                     } catch (e) {
                         console.error('Failed to load receipts:', e);
                     }
+                },
+
+                showValidationErrors(receipt) {
+                    this.selectedReceiptErrors = receipt.validation_errors || [];
                 },
                 
                 async loadNextInvoiceNo() {

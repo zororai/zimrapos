@@ -12,6 +12,48 @@ use Illuminate\Support\Facades\Storage;
 class ZimraDeviceService
 {
     /**
+     * ZIMRA Validation Error Code Descriptions
+     * Reference: FDMS Technical Specification
+     */
+    private const VALIDATION_ERROR_MESSAGES = [
+        'RCPT001' => 'Invalid receipt type',
+        'RCPT002' => 'Invalid receipt currency',
+        'RCPT003' => 'Invalid receipt counter - must be sequential',
+        'RCPT004' => 'Invalid receipt global number',
+        'RCPT005' => 'Invalid invoice number',
+        'RCPT006' => 'Invalid buyer data',
+        'RCPT007' => 'Invalid receipt date',
+        'RCPT008' => 'Invalid credit/debit note reference',
+        'RCPT009' => 'Invalid receipt lines',
+        'RCPT010' => 'Invalid receipt line type',
+        'RCPT011' => 'Receipt hash mismatch - signature verification failed',
+        'RCPT012' => 'Invalid tax code',
+        'RCPT013' => 'Invalid tax percent - does not match registered tax rate',
+        'RCPT014' => 'Invalid tax ID - not registered for this device',
+        'RCPT015' => 'Invalid tax amount calculation',
+        'RCPT016' => 'Invalid sales amount with tax',
+        'RCPT017' => 'Invalid payment method',
+        'RCPT018' => 'Invalid payment amount',
+        'RCPT019' => 'Payment total does not match receipt total',
+        'RCPT020' => 'Invalid receipt total calculation',
+        'RCPT021' => 'Invalid fiscal day number - day not open or mismatch',
+        'RCPT022' => 'Invalid receipt print form',
+        'RCPT023' => 'Invalid HS code',
+        'RCPT024' => 'Invalid receipt line quantity',
+        'RCPT025' => 'Invalid receipt device signature',
+        'RCPT026' => 'Receipt line total mismatch (price * quantity)',
+        'RCPT027' => 'Tax amount sum does not match receipt taxes',
+        'RCPT028' => 'Duplicate receipt counter for fiscal day',
+        'RCPT029' => 'Fiscal day is closed',
+        'RCPT030' => 'Device not authorized',
+        'RCPT031' => 'Certificate expired or invalid',
+        'RCPT032' => 'Invalid receipt notes',
+        'RCPT033' => 'Missing required field',
+        'RCPT034' => 'Invalid VAT number format',
+        'RCPT035' => 'Invalid TIN format',
+    ];
+
+    /**
      * Prepare mTLS certificates - validates and writes to storage
      * @throws \Exception if certificates are not found
      */
@@ -1230,15 +1272,6 @@ class ZimraDeviceService
             throw new \Exception('No device ID found in configuration.');
         }
 
-        // Check fiscal day is open
-        $fiscalDay = FiscalDay::getCurrentOpen($deviceId);
-        if (!$fiscalDay) {
-            return [
-                'error' => true,
-                'message' => 'No open fiscal day. Open a fiscal day before submitting receipts.'
-            ];
-        }
-
         $baseUrl = $zimraConfig->base_url;
 
         // Write certificates from database to files for mTLS
@@ -1249,7 +1282,54 @@ class ZimraDeviceService
 
         /*
         |--------------------------------------------------------------------------
-        | 1️⃣ Get Tax Configuration from FDMS (GetConfig)
+        | 1️⃣ Get Fiscal Day Status from FDMS (Fix RCPT021)
+        |--------------------------------------------------------------------------
+        */
+        $fdmsStatus = $this->getStatus($deviceId);
+        
+        if (isset($fdmsStatus['error'])) {
+            throw new \Exception('Failed to get device status from FDMS: ' . json_encode($fdmsStatus));
+        }
+
+        $fdmsFiscalDayStatus = $fdmsStatus['fiscalDayStatus'] ?? null;
+        $fdmsFiscalDayNo = $fdmsStatus['lastFiscalDayNo'] ?? null;
+
+        Log::info('ZIMRA SubmitReceipt - FDMS Status', [
+            'fiscalDayStatus' => $fdmsFiscalDayStatus,
+            'lastFiscalDayNo' => $fdmsFiscalDayNo,
+        ]);
+
+        // Verify fiscal day is open on FDMS
+        if ($fdmsFiscalDayStatus !== 'FiscalDayOpened') {
+            throw new \Exception(
+                "FDMS fiscal day is not open. Status: {$fdmsFiscalDayStatus}. " .
+                "Please open fiscal day {$fdmsFiscalDayNo} on FDMS first."
+            );
+        }
+
+        // Use FDMS fiscal day number, not local
+        $fiscalDayNo = (int) $fdmsFiscalDayNo;
+
+        // Check local fiscal day exists
+        $fiscalDay = FiscalDay::getCurrentOpen($deviceId);
+        if (!$fiscalDay) {
+            return [
+                'error' => true,
+                'message' => 'No open fiscal day locally. Open a fiscal day before submitting receipts.'
+            ];
+        }
+
+        // Sync local fiscal day with FDMS if different
+        if ($fiscalDay->fiscal_day_no !== $fiscalDayNo) {
+            Log::warning('ZIMRA SubmitReceipt - Local fiscal day mismatch, using FDMS value', [
+                'local_fiscal_day_no' => $fiscalDay->fiscal_day_no,
+                'fdms_fiscal_day_no' => $fiscalDayNo,
+            ]);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | 2️⃣ Get Tax Configuration from FDMS (GetConfig)
         |--------------------------------------------------------------------------
         */
         $fdmsTaxes = $this->getFdmsTaxConfig($zimraConfig);
@@ -1260,7 +1340,7 @@ class ZimraDeviceService
 
         /*
         |--------------------------------------------------------------------------
-        | 2️⃣ Validate Invoice Number Uniqueness
+        | 3️⃣ Validate Invoice Number Uniqueness
         |--------------------------------------------------------------------------
         */
         $invoiceNo = $receiptData['invoiceNo'] ?? null;
@@ -1278,11 +1358,11 @@ class ZimraDeviceService
 
         /*
         |--------------------------------------------------------------------------
-        | 3️⃣ Get Correct Receipt Counter from Database
+        | 4️⃣ Get Correct Receipt Counter from Database (using FDMS fiscal day)
         |--------------------------------------------------------------------------
         */
         $lastReceipt = Receipt::where('device_id', $deviceId)
-            ->where('fiscal_day_no', $fiscalDay->fiscal_day_no)
+            ->where('fiscal_day_no', $fiscalDayNo)
             ->orderBy('receipt_counter', 'desc')
             ->first();
         
@@ -1301,7 +1381,7 @@ class ZimraDeviceService
             'next_receipt_counter' => $nextReceiptCounter,
             'last_global_no' => $lastGlobalNo,
             'next_global_no' => $nextGlobalNo,
-            'fiscal_day_no' => $fiscalDay->fiscal_day_no,
+            'fdms_fiscal_day_no' => $fiscalDayNo,
         ]);
 
         // Override counters with calculated values
@@ -1310,33 +1390,33 @@ class ZimraDeviceService
 
         /*
         |--------------------------------------------------------------------------
-        | 4️⃣ Build & Validate Receipt with Tax Calculations (using FDMS taxes)
+        | 5️⃣ Build & Validate Receipt with BCMath Tax Calculations (Fix RCPT020)
         |--------------------------------------------------------------------------
         */
-        $receiptData = $this->buildAndValidateReceipt($receiptData, $fiscalDay, $fdmsTaxes);
+        $receiptData = $this->buildAndValidateReceiptBCMath($receiptData, $fiscalDayNo, $fdmsTaxes);
 
         /*
         |--------------------------------------------------------------------------
-        | 5️⃣ Generate Device Signature (FDMS Spec Section 13.2)
+        | 6️⃣ Generate Device Signature (FDMS Spec Section 13.2) (Fix RCPT025)
         |--------------------------------------------------------------------------
         */
         // Remove existing signature if present
         unset($receiptData['receiptDeviceSignature']);
 
-        // Set fiscal day number from current open day
-        $receiptData['fiscalDayNo'] = $fiscalDay->fiscal_day_no;
+        // Set fiscal day number from FDMS (not local)
+        $receiptData['fiscalDayNo'] = $fiscalDayNo;
 
-        // Generate signature with canonical field ordering per FDMS spec
-        $receiptData['receiptDeviceSignature'] = $this->signReceiptData($receiptData);
+        // Generate signature with canonical field ordering and 2 decimal formatting
+        $receiptData['receiptDeviceSignature'] = $this->signReceiptDataCanonical($receiptData);
 
         /*
         |--------------------------------------------------------------------------
-        | 6️⃣ Send To ZIMRA
+        | 7️⃣ Send To ZIMRA
         |--------------------------------------------------------------------------
         */
         Log::info('ZIMRA SubmitReceipt Request', [
             'device_id' => $deviceId,
-            'fiscal_day_no' => $fiscalDay->fiscal_day_no,
+            'fdms_fiscal_day_no' => $fiscalDayNo,
             'receipt_counter' => $receiptData['receiptCounter'],
             'receipt_global_no' => $receiptData['receiptGlobalNo'],
             'receipt_total' => $receiptData['receiptTotal'],
@@ -1406,7 +1486,12 @@ class ZimraDeviceService
             foreach ($validationErrors as $error) {
                 $errorCode = $error['validationErrorCode'] ?? $error['errorCode'] ?? null;
                 $errorColor = $error['validationErrorColor'] ?? null;
-                $errorMessage = $error['errorMessage'] ?? $error['message'] ?? 'No message';
+                
+                // Get error message from lookup table, fallback to response message or code description
+                $errorMessage = $error['errorMessage'] 
+                    ?? $error['message'] 
+                    ?? self::VALIDATION_ERROR_MESSAGES[$errorCode] 
+                    ?? "Unknown error ({$errorCode})";
                 
                 // Track error color flags
                 if ($errorColor === 'Red') {
@@ -1433,14 +1518,14 @@ class ZimraDeviceService
             }
         }
 
-        // Also check top-level validation code
-        $receiptValidationCode = $responseData['receiptValidationCode'] ?? 'Green';
-        
-        // Set flags based on top-level code if not already set
-        if ($receiptValidationCode === 'Red') {
-            $hasRedErrors = true;
-        } elseif ($receiptValidationCode === 'Gray' || $receiptValidationCode === 'Grey') {
-            $hasGrayErrors = true;
+        // Fix validation logic: if any red errors exist, set validation_code to Red
+        // Do not mark receipt as Green if red errors exist
+        if ($hasRedErrors) {
+            $receiptValidationCode = 'Red';
+        } elseif ($hasGrayErrors) {
+            $receiptValidationCode = 'Gray';
+        } else {
+            $receiptValidationCode = $responseData['receiptValidationCode'] ?? 'Green';
         }
         
         $isValid = !$hasRedErrors && !$hasGrayErrors && empty($validationErrors);
@@ -1606,6 +1691,451 @@ class ZimraDeviceService
                 'taxName' => 'VAT Standard',
             ]
         ];
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Build & Validate Receipt with BCMath Precision (Fix RCPT020)
+    |--------------------------------------------------------------------------
+    | Uses BCMath for all tax calculations to ensure exact decimal precision
+    |--------------------------------------------------------------------------
+    */
+    private function buildAndValidateReceiptBCMath(array $receiptData, int $fiscalDayNo, array $fdmsTaxes = []): array
+    {
+        // Default to tax-inclusive unless explicitly set
+        $taxInclusive = $receiptData['receiptLinesTaxInclusive'] ?? false;
+        $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
+
+        // Build tax lookup from FDMS config
+        $taxLookup = [];
+        foreach ($fdmsTaxes as $tax) {
+            $code = $tax['taxCode'] ?? 'A';
+            $taxLookup[$code] = [
+                'taxID' => $tax['taxID'] ?? 1,
+                'taxPercent' => (string) ($tax['taxPercent'] ?? '15.00'),
+            ];
+        }
+
+        Log::debug('Receipt Tax Mode (BCMath)', [
+            'tax_inclusive' => $taxInclusive,
+            'fdms_tax_lookup' => $taxLookup,
+            'fiscal_day_no' => $fiscalDayNo,
+        ]);
+
+        /*
+        |--------------------------------------------------------------------------
+        | Calculate Line Totals & Taxes using BCMath
+        |--------------------------------------------------------------------------
+        */
+        $receiptLines = $receiptData['receiptLines'] ?? [];
+        $taxTotals = [];
+        $calculatedReceiptTotal = '0.00';
+
+        foreach ($receiptLines as $index => &$line) {
+            $price = $this->bcFormat($line['receiptLinePrice'] ?? '0');
+            $quantity = $this->bcFormat($line['receiptLineQuantity'] ?? '1');
+            $taxCode = $line['taxCode'] ?? 'A';
+            
+            // Get taxID and taxPercent from FDMS config
+            $fdmsTax = $taxLookup[$taxCode] ?? ['taxID' => 1, 'taxPercent' => '15.00'];
+            $taxID = $line['taxID'] ?? $fdmsTax['taxID'];
+            $taxPercent = $this->bcFormat($line['taxPercent'] ?? $fdmsTax['taxPercent']);
+            
+            // Update line with correct values
+            $line['taxID'] = $taxID;
+            $line['taxPercent'] = (float) $taxPercent;
+
+            // Calculate line total: price * quantity
+            $lineTotal = bcmul($price, $quantity, 4);
+
+            if ($taxInclusive) {
+                // Tax inclusive: taxAmount = lineTotal * taxPercent / (100 + taxPercent)
+                $divisor = bcadd('100', $taxPercent, 4);
+                $taxAmount = bcdiv(bcmul($lineTotal, $taxPercent, 4), $divisor, 4);
+                $salesAmountWithTax = $lineTotal;
+            } else {
+                // Tax exclusive: taxAmount = lineTotal * taxPercent / 100
+                $taxAmount = bcdiv(bcmul($lineTotal, $taxPercent, 4), '100', 4);
+                $salesAmountWithTax = bcadd($lineTotal, $taxAmount, 4);
+            }
+
+            // Round final values to 2 decimals
+            $lineTotal = $this->bcRound($lineTotal, 2);
+            $taxAmount = $this->bcRound($taxAmount, 2);
+            $salesAmountWithTax = $this->bcRound($salesAmountWithTax, 2);
+
+            // Update line with formatted values (always 2 decimals)
+            $line['receiptLinePrice'] = (float) $price;
+            $line['receiptLineQuantity'] = (float) $quantity;
+            $line['receiptLineTotal'] = (float) $lineTotal;
+
+            // Accumulate tax totals by taxCode
+            $taxKey = "{$taxCode}_{$taxPercent}_{$taxID}";
+            if (!isset($taxTotals[$taxKey])) {
+                $taxTotals[$taxKey] = [
+                    'taxCode' => $taxCode,
+                    'taxPercent' => (float) $taxPercent,
+                    'taxID' => $taxID,
+                    'taxAmount' => '0.00',
+                    'salesAmountWithTax' => '0.00',
+                ];
+            }
+            $taxTotals[$taxKey]['taxAmount'] = bcadd($taxTotals[$taxKey]['taxAmount'], $taxAmount, 2);
+            $taxTotals[$taxKey]['salesAmountWithTax'] = bcadd($taxTotals[$taxKey]['salesAmountWithTax'], $salesAmountWithTax, 2);
+
+            // Accumulate receipt total
+            $calculatedReceiptTotal = bcadd($calculatedReceiptTotal, $salesAmountWithTax, 2);
+
+            Log::debug('Receipt Line Calculation (BCMath)', [
+                'line_no' => $line['receiptLineNo'] ?? $index + 1,
+                'price' => $price,
+                'quantity' => $quantity,
+                'tax_percent' => $taxPercent,
+                'tax_inclusive' => $taxInclusive,
+                'line_total' => $lineTotal,
+                'tax_amount' => $taxAmount,
+                'sales_amount_with_tax' => $salesAmountWithTax,
+            ]);
+        }
+        unset($line);
+
+        $receiptData['receiptLines'] = $receiptLines;
+
+        // Convert tax totals to float with 2 decimal precision
+        $formattedTaxes = [];
+        foreach ($taxTotals as $tax) {
+            $formattedTaxes[] = [
+                'taxCode' => $tax['taxCode'],
+                'taxPercent' => (float) $tax['taxPercent'],
+                'taxID' => $tax['taxID'],
+                'taxAmount' => (float) $tax['taxAmount'],
+                'salesAmountWithTax' => (float) $tax['salesAmountWithTax'],
+            ];
+        }
+        $receiptData['receiptTaxes'] = $formattedTaxes;
+
+        // Set receipt total (always 2 decimals)
+        $receiptData['receiptTotal'] = (float) $calculatedReceiptTotal;
+
+        Log::debug('Receipt Tax Totals (BCMath)', [
+            'taxes' => $receiptData['receiptTaxes'],
+            'calculated_receipt_total' => $calculatedReceiptTotal,
+        ]);
+
+        /*
+        |--------------------------------------------------------------------------
+        | Validate Payments Match Total
+        |--------------------------------------------------------------------------
+        */
+        $payments = $receiptData['receiptPayments'] ?? [];
+        $totalPayments = '0.00';
+
+        foreach ($payments as &$payment) {
+            $paymentAmount = $this->bcFormat($payment['paymentAmount'] ?? '0');
+            $payment['paymentAmount'] = (float) $paymentAmount;
+            $totalPayments = bcadd($totalPayments, $paymentAmount, 2);
+        }
+        unset($payment);
+        $receiptData['receiptPayments'] = $payments;
+
+        Log::debug('Receipt Payments Validation (BCMath)', [
+            'receipt_total' => $calculatedReceiptTotal,
+            'total_payments' => $totalPayments,
+            'payment_count' => count($payments),
+        ]);
+
+        // Validate: receiptTotal == sum(paymentAmount)
+        if (bccomp($totalPayments, $calculatedReceiptTotal, 2) !== 0) {
+            Log::error('Receipt Payment Mismatch (BCMath)', [
+                'receipt_total' => $calculatedReceiptTotal,
+                'total_payments' => $totalPayments,
+            ]);
+            throw new \Exception(
+                "Payment mismatch: receiptTotal ({$calculatedReceiptTotal}) != sum of payments ({$totalPayments})"
+            );
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | Validate salesAmountWithTax Sum Matches receiptTotal
+        |--------------------------------------------------------------------------
+        */
+        $totalSalesWithTax = '0.00';
+        foreach ($receiptData['receiptTaxes'] as $tax) {
+            $totalSalesWithTax = bcadd($totalSalesWithTax, $this->bcFormat($tax['salesAmountWithTax']), 2);
+        }
+
+        Log::debug('Receipt Tax Total Validation (BCMath)', [
+            'receipt_total' => $calculatedReceiptTotal,
+            'sum_sales_with_tax' => $totalSalesWithTax,
+        ]);
+
+        // Validate: receiptTotal == sum(salesAmountWithTax)
+        if (bccomp($totalSalesWithTax, $calculatedReceiptTotal, 2) !== 0) {
+            Log::error('Receipt Tax Sum Mismatch (BCMath)', [
+                'receipt_total' => $calculatedReceiptTotal,
+                'sum_sales_with_tax' => $totalSalesWithTax,
+            ]);
+            throw new \Exception(
+                "Tax mismatch: receiptTotal ({$calculatedReceiptTotal}) != sum of salesAmountWithTax ({$totalSalesWithTax})"
+            );
+        }
+
+        Log::info('Receipt Validated Successfully (BCMath)', [
+            'receipt_total' => $calculatedReceiptTotal,
+            'tax_inclusive' => $taxInclusive,
+            'line_count' => count($receiptLines),
+            'tax_groups' => count($receiptData['receiptTaxes']),
+            'fiscal_day_no' => $fiscalDayNo,
+        ]);
+
+        return $receiptData;
+    }
+
+    /**
+     * Format number for BCMath (ensure string with proper decimals)
+     */
+    private function bcFormat($value, int $decimals = 2): string
+    {
+        if (is_string($value)) {
+            return number_format((float) $value, $decimals, '.', '');
+        }
+        return number_format($value, $decimals, '.', '');
+    }
+
+    /**
+     * Round using BCMath
+     */
+    private function bcRound(string $value, int $precision = 2): string
+    {
+        $pow = bcpow('10', (string) $precision, 0);
+        return bcdiv(bcadd(bcmul($value, $pow, $precision + 1), '0.5', $precision + 1), $pow, $precision);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Sign Receipt Data with Canonical JSON (Fix RCPT025)
+    |--------------------------------------------------------------------------
+    | Ensures canonical JSON formatting with 2 decimal places for all numbers
+    |--------------------------------------------------------------------------
+    */
+    private function signReceiptDataCanonical(array $receiptData): array
+    {
+        // Build canonical receipt with exact field order and 2 decimal formatting
+        $canonicalReceipt = $this->buildCanonicalReceiptWithDecimals($receiptData);
+        
+        // Encode with flags to preserve formatting
+        $json = json_encode($canonicalReceipt, JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
+
+        Log::info('ZIMRA signReceiptDataCanonical - JSON to sign', [
+            'json' => $json,
+            'json_length' => strlen($json),
+        ]);
+
+        // SHA256 hash
+        $hashBinary = hash('sha256', $json, true);
+        $hashBase64 = base64_encode($hashBinary);
+
+        Log::info('ZIMRA signReceiptDataCanonical - Hash', [
+            'hash_base64' => $hashBase64,
+        ]);
+
+        // Load private key
+        $privateKeyPath = storage_path('app/zimra/device_private.key');
+        
+        if (!file_exists($privateKeyPath)) {
+            throw new \Exception('Device private key not found. Please register device first.');
+        }
+
+        $privateKey = openssl_pkey_get_private(file_get_contents($privateKeyPath));
+
+        if (!$privateKey) {
+            throw new \Exception('Failed to load private key for signing.');
+        }
+
+        // Sign with ECDSA (prime256v1) using SHA256
+        openssl_sign($json, $signatureBinary, $privateKey, OPENSSL_ALGO_SHA256);
+        $signatureBase64 = base64_encode($signatureBinary);
+
+        Log::info('ZIMRA signReceiptDataCanonical - Signature', [
+            'signature_base64' => $signatureBase64,
+        ]);
+
+        // Verify signature against public key before sending
+        $certPath = storage_path('app/zimra/device_certificate.pem');
+        if (file_exists($certPath)) {
+            $cert = openssl_x509_read(file_get_contents($certPath));
+            if ($cert) {
+                $publicKey = openssl_pkey_get_public($cert);
+                $verifyResult = openssl_verify($json, $signatureBinary, $publicKey, OPENSSL_ALGO_SHA256);
+                
+                Log::info('ZIMRA signReceiptDataCanonical - Verification', [
+                    'verified' => $verifyResult === 1,
+                ]);
+                
+                if ($verifyResult !== 1) {
+                    Log::error('ZIMRA signReceiptDataCanonical - Verification FAILED');
+                }
+            }
+        }
+
+        return [
+            'hash' => $hashBase64,
+            'signature' => $signatureBase64,
+        ];
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Build Canonical Receipt with 2 Decimal Formatting
+    |--------------------------------------------------------------------------
+    */
+    private function buildCanonicalReceiptWithDecimals(array $receiptData): array
+    {
+        $canonical = [];
+
+        // Canonical field order per FDMS spec
+        $fieldOrder = [
+            'receiptType',
+            'receiptCurrency',
+            'receiptCounter',
+            'receiptGlobalNo',
+            'invoiceNo',
+            'buyerData',
+            'receiptNotes',
+            'receiptDate',
+            'creditDebitNote',
+            'receiptLinesTaxInclusive',
+            'receiptLines',
+            'receiptTaxes',
+            'receiptPayments',
+            'receiptTotal',
+            'receiptPrintForm',
+            'fiscalDayNo',
+        ];
+
+        foreach ($fieldOrder as $field) {
+            if (!array_key_exists($field, $receiptData)) {
+                continue;
+            }
+
+            $value = $receiptData[$field];
+            
+            if ($field === 'receiptLines') {
+                $canonical[$field] = $this->formatReceiptLinesCanonical($value);
+            } elseif ($field === 'receiptTaxes') {
+                $canonical[$field] = $this->formatReceiptTaxesCanonical($value);
+            } elseif ($field === 'receiptPayments') {
+                $canonical[$field] = $this->formatReceiptPaymentsCanonical($value);
+            } elseif ($field === 'receiptTotal') {
+                // Ensure 2 decimal places
+                $canonical[$field] = (float) number_format((float) $value, 2, '.', '');
+            } elseif ($field === 'buyerData' && is_array($value)) {
+                $canonical[$field] = $this->formatBuyerDataCanonical($value);
+            } else {
+                $canonical[$field] = $value;
+            }
+        }
+
+        return $canonical;
+    }
+
+    private function formatReceiptLinesCanonical(array $lines): array
+    {
+        $result = [];
+        $lineOrder = [
+            'receiptLineNo',
+            'receiptLineType',
+            'receiptLineName',
+            'receiptLineQuantity',
+            'receiptLinePrice',
+            'receiptLineTotal',
+            'taxCode',
+            'taxPercent',
+            'taxID',
+            'receiptLineHSCode',
+        ];
+
+        foreach ($lines as $line) {
+            $canonicalLine = [];
+            foreach ($lineOrder as $field) {
+                if (!array_key_exists($field, $line)) {
+                    continue;
+                }
+                $value = $line[$field];
+                
+                // Format numeric fields with 2 decimals
+                if (in_array($field, ['receiptLineQuantity', 'receiptLinePrice', 'receiptLineTotal', 'taxPercent'])) {
+                    $canonicalLine[$field] = (float) number_format((float) $value, 2, '.', '');
+                } else {
+                    $canonicalLine[$field] = $value;
+                }
+            }
+            $result[] = $canonicalLine;
+        }
+        return $result;
+    }
+
+    private function formatReceiptTaxesCanonical(array $taxes): array
+    {
+        $result = [];
+        $taxOrder = ['taxCode', 'taxPercent', 'taxID', 'taxAmount', 'salesAmountWithTax'];
+
+        foreach ($taxes as $tax) {
+            $canonicalTax = [];
+            foreach ($taxOrder as $field) {
+                if (!array_key_exists($field, $tax)) {
+                    continue;
+                }
+                $value = $tax[$field];
+                
+                // Format numeric fields with 2 decimals
+                if (in_array($field, ['taxPercent', 'taxAmount', 'salesAmountWithTax'])) {
+                    $canonicalTax[$field] = (float) number_format((float) $value, 2, '.', '');
+                } else {
+                    $canonicalTax[$field] = $value;
+                }
+            }
+            $result[] = $canonicalTax;
+        }
+        return $result;
+    }
+
+    private function formatReceiptPaymentsCanonical(array $payments): array
+    {
+        $result = [];
+        $paymentOrder = ['moneyTypeCode', 'paymentAmount'];
+
+        foreach ($payments as $payment) {
+            $canonicalPayment = [];
+            foreach ($paymentOrder as $field) {
+                if (!array_key_exists($field, $payment)) {
+                    continue;
+                }
+                $value = $payment[$field];
+                
+                // Format numeric fields with 2 decimals
+                if ($field === 'paymentAmount') {
+                    $canonicalPayment[$field] = (float) number_format((float) $value, 2, '.', '');
+                } else {
+                    $canonicalPayment[$field] = $value;
+                }
+            }
+            $result[] = $canonicalPayment;
+        }
+        return $result;
+    }
+
+    private function formatBuyerDataCanonical(array $buyerData): array
+    {
+        $buyerOrder = ['buyerRegisterName', 'buyerTradeName', 'vatNumber', 'buyerTIN', 'buyerContacts', 'buyerAddress'];
+        $canonical = [];
+        foreach ($buyerOrder as $field) {
+            if (array_key_exists($field, $buyerData)) {
+                $canonical[$field] = $buyerData[$field];
+            }
+        }
+        return $canonical;
     }
 
     /*

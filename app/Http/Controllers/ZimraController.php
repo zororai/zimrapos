@@ -18,25 +18,48 @@ class ZimraController extends Controller
     public function storeConfig(Request $request)
     {
         $validated = $request->validate([
+            'company_name' => 'required|string|max:255',
+            'company_tin' => 'nullable|string|max:50',
             'base_url' => 'required|url',
             'device_model' => 'required|string',
             'device_version' => 'required|string',
         ]);
 
-        // Deactivate existing configs
-        ZimraConfig::where('is_active', true)->update(['is_active' => false]);
+        // Deactivate existing configs if this is the first one
+        $existingCount = ZimraConfig::count();
+        if ($existingCount === 0) {
+            $isActive = true;
+        } else {
+            $isActive = false;
+        }
 
         $config = ZimraConfig::create([
+            'company_name' => $validated['company_name'],
+            'company_tin' => $validated['company_tin'] ?? null,
             'base_url' => $validated['base_url'],
             'device_model' => $validated['device_model'],
             'device_version' => $validated['device_version'],
-            'is_active' => true,
+            'is_active' => $isActive,
         ]);
 
         return response()->json([
             'message' => 'ZIMRA configuration stored successfully',
             'config' => $config,
         ], 201);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Get All ZIMRA Configurations (for company selector)
+    |--------------------------------------------------------------------------
+    */
+    public function getAllConfigs()
+    {
+        $configs = ZimraConfig::select('id', 'company_name', 'company_tin', 'device_id', 'is_active', 'base_url', 'device_model', 'device_version')
+            ->orderBy('company_name')
+            ->get();
+
+        return response()->json($configs);
     }
 
     /*
@@ -55,6 +78,45 @@ class ZimraController extends Controller
         }
 
         return response()->json($config);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Get ZIMRA Configuration by ID
+    |--------------------------------------------------------------------------
+    */
+    public function getConfigById(int $id)
+    {
+        $config = ZimraConfig::find($id);
+
+        if (!$config) {
+            return response()->json([
+                'message' => 'Configuration not found',
+            ], 404);
+        }
+
+        return response()->json($config);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Set Active Configuration
+    |--------------------------------------------------------------------------
+    */
+    public function setActiveConfig(int $id)
+    {
+        $config = ZimraConfig::findOrFail($id);
+        
+        // Deactivate all other configs
+        ZimraConfig::where('id', '!=', $id)->update(['is_active' => false]);
+        
+        // Activate this one
+        $config->update(['is_active' => true]);
+
+        return response()->json([
+            'message' => 'Configuration activated successfully',
+            'config' => $config,
+        ]);
     }
 
     /*
@@ -508,25 +570,30 @@ class ZimraController extends Controller
             return response()->json(['invoice_no' => 'INV-001']);
         }
 
-        // Get the last invoice number for this device
-        $lastReceipt = Receipt::where('device_id', $config->device_id)
-            ->orderBy('id', 'desc')
-            ->first();
+        // Get all receipts for this device and find the highest invoice number
+        $receipts = Receipt::where('device_id', $config->device_id)
+            ->whereNotNull('invoice_no')
+            ->pluck('invoice_no');
 
-        if (!$lastReceipt || !$lastReceipt->invoice_no) {
+        if ($receipts->isEmpty()) {
             return response()->json(['invoice_no' => 'INV-001']);
         }
 
-        // Extract number from invoice_no (e.g., "INV-005" -> 5)
-        $matches = [];
-        if (preg_match('/INV-(\d+)/', $lastReceipt->invoice_no, $matches)) {
-            $nextNumber = (int) $matches[1] + 1;
-            return response()->json([
-                'invoice_no' => 'INV-' . str_pad($nextNumber, 3, '0', STR_PAD_LEFT)
-            ]);
+        // Find the highest invoice number
+        $highestNumber = 0;
+        foreach ($receipts as $invoiceNo) {
+            if (preg_match('/INV-(\d+)/', $invoiceNo, $matches)) {
+                $number = (int) $matches[1];
+                if ($number > $highestNumber) {
+                    $highestNumber = $number;
+                }
+            }
         }
 
-        return response()->json(['invoice_no' => 'INV-001']);
+        $nextNumber = $highestNumber + 1;
+        return response()->json([
+            'invoice_no' => 'INV-' . str_pad($nextNumber, 3, '0', STR_PAD_LEFT)
+        ]);
     }
 
     /*
