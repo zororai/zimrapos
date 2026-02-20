@@ -54,12 +54,25 @@ class ZimraDeviceService
      */
     private function signData(array $data): array
     {
-        $json = json_encode($data, JSON_UNESCAPED_SLASHES);
+        $json = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
+
+        // DEBUG: Log exact JSON being signed
+        Log::debug('ZIMRA signData - JSON to sign', [
+            'json' => $json,
+            'json_length' => strlen($json),
+        ]);
 
         $hashBinary = hash('sha256', $json, true);
         $hashBase64 = base64_encode($hashBinary);
 
+        // DEBUG: Log hash
+        Log::debug('ZIMRA signData - Hash', [
+            'hash_hex' => bin2hex($hashBinary),
+            'hash_base64' => $hashBase64,
+        ]);
+
         $privateKeyPath = storage_path('app/zimra/device_private.key');
+        $certPath = storage_path('app/zimra/device_certificate.pem');
         
         if (!file_exists($privateKeyPath)) {
             throw new \Exception('Device private key not found. Please register device first.');
@@ -71,8 +84,54 @@ class ZimraDeviceService
             throw new \Exception('Failed to load private key for signing.');
         }
 
-        openssl_sign($hashBinary, $signatureBinary, $privateKey, OPENSSL_ALGO_SHA256);
+        // VERIFY: Check if private key matches certificate
+        if (file_exists($certPath)) {
+            $cert = openssl_x509_read(file_get_contents($certPath));
+            if ($cert) {
+                $keyMatchesCert = openssl_x509_check_private_key($cert, $privateKey);
+                Log::info('ZIMRA signData - Certificate/Key Match Check', [
+                    'key_matches_certificate' => $keyMatchesCert,
+                ]);
+                if (!$keyMatchesCert) {
+                    Log::error('ZIMRA signData - PRIVATE KEY DOES NOT MATCH CERTIFICATE! Re-register device required.');
+                }
+            }
+        }
+
+        // DEBUG: Log key details
+        $keyDetails = openssl_pkey_get_details($privateKey);
+        Log::debug('ZIMRA signData - Key details', [
+            'key_type' => $keyDetails['type'] ?? 'unknown',
+            'key_bits' => $keyDetails['bits'] ?? 'unknown',
+        ]);
+
+        openssl_sign($json, $signatureBinary, $privateKey, OPENSSL_ALGO_SHA256);
         $signatureBase64 = base64_encode($signatureBinary);
+
+        // DEBUG: Log signature
+        Log::debug('ZIMRA signData - Signature', [
+            'signature_base64' => $signatureBase64,
+            'signature_length' => strlen($signatureBinary),
+        ]);
+
+        // VERIFY: Local signature verification before sending
+        if (file_exists($certPath)) {
+            $cert = openssl_x509_read(file_get_contents($certPath));
+            if ($cert) {
+                $publicKey = openssl_pkey_get_public($cert);
+                $verifyResult = openssl_verify($json, $signatureBinary, $publicKey, OPENSSL_ALGO_SHA256);
+                Log::info('ZIMRA signData - Local Signature Verification', [
+                    'local_signature_valid' => $verifyResult,
+                    'verify_meaning' => $verifyResult === 1 ? 'VALID' : ($verifyResult === 0 ? 'INVALID' : 'ERROR'),
+                ]);
+                if ($verifyResult !== 1) {
+                    Log::error('ZIMRA signData - LOCAL SIGNATURE VERIFICATION FAILED!', [
+                        'result' => $verifyResult,
+                        'openssl_error' => openssl_error_string(),
+                    ]);
+                }
+            }
+        }
 
         return [
             'hash' => $hashBase64,
@@ -583,8 +642,58 @@ class ZimraDeviceService
             throw new \Exception('No device ID found in configuration.');
         }
 
-        // Get current open fiscal day
+        // Get current open fiscal day OR last fiscal day that needs retry
         $fiscalDay = FiscalDay::getCurrentOpen($deviceId);
+        
+        // If no open day, check ZIMRA status
+        if (!$fiscalDay) {
+            $zimraStatus = $this->getStatus();
+            $status = $zimraStatus['fiscalDayStatus'] ?? null;
+            
+            // FiscalDayCloseInitiated = close is in progress, do NOT retry
+            if ($status === 'FiscalDayCloseInitiated') {
+                Log::info('ZIMRA CloseDay - Close already in progress, waiting for completion', [
+                    'status' => $status,
+                    'last_fiscal_day_no' => $zimraStatus['lastFiscalDayNo'] ?? 0,
+                ]);
+                return [
+                    'success' => false,
+                    'status' => 'pending',
+                    'message' => 'Fiscal day close is in progress. Please wait and check status again.',
+                    'zimra_status' => $zimraStatus,
+                ];
+            }
+            
+            // FiscalDayClosed = already closed, nothing to do
+            if ($status === 'FiscalDayClosed') {
+                Log::info('ZIMRA CloseDay - Day already closed', [
+                    'status' => $status,
+                    'last_fiscal_day_no' => $zimraStatus['lastFiscalDayNo'] ?? 0,
+                ]);
+                return [
+                    'success' => true,
+                    'message' => 'Fiscal day is already closed.',
+                    'zimra_status' => $zimraStatus,
+                ];
+            }
+            
+            // FiscalDayCloseFailed = retry needed
+            if ($status === 'FiscalDayCloseFailed') {
+                // Find the fiscal day that failed to close
+                $fiscalDay = FiscalDay::where('device_id', $deviceId)
+                    ->where('fiscal_day_no', $zimraStatus['lastFiscalDayNo'] ?? 0)
+                    ->first();
+                
+                if ($fiscalDay) {
+                    Log::info('ZIMRA CloseDay - Retrying failed close', [
+                        'fiscal_day_no' => $fiscalDay->fiscal_day_no,
+                        'zimra_status' => $status,
+                        'error_code' => $zimraStatus['fiscalDayClosingErrorCode'] ?? 'unknown',
+                    ]);
+                }
+            }
+        }
+        
         if (!$fiscalDay) {
             return [
                 'error' => true,
@@ -602,15 +711,56 @@ class ZimraDeviceService
 
         // Build payload from database if not provided
         if (!$payload) {
+            // Filter counters: remove zero values and fix structure per ZIMRA FDMS v7.2
+            $rawCounters = $fiscalDay->fiscal_counters ?? [];
+            $filteredCounters = [];
+            foreach ($rawCounters as $counter) {
+                // Skip zero value counters
+                if (empty($counter['fiscalCounterValue']) || $counter['fiscalCounterValue'] == 0) {
+                    continue;
+                }
+                // For SaleByTax: remove fiscalCounterMoneyType (not allowed per spec)
+                if (isset($counter['fiscalCounterType']) && strtolower($counter['fiscalCounterType']) === 'salebytax') {
+                    unset($counter['fiscalCounterMoneyType']);
+                }
+                $filteredCounters[] = $counter;
+            }
+
             $payload = [
                 'fiscalDayNo' => $fiscalDay->fiscal_day_no,
-                'fiscalDayCounters' => $fiscalDay->fiscal_counters ?? [],
+                'fiscalDayCounters' => $filteredCounters,
                 'receiptCounter' => $fiscalDay->receipt_counter ?? 0,
             ];
         }
 
+        // DEBUG: Log payload before signing
+        Log::debug('ZIMRA CloseDay - Payload before signing', [
+            'payload' => $payload,
+        ]);
+
         // Sign the payload - required by ZIMRA
         $payload['fiscalDayDeviceSignature'] = $this->signData($payload);
+
+        // DEBUG: Log final payload being sent
+        Log::debug('ZIMRA CloseDay - Final payload', [
+            'payload_json' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION),
+        ]);
+
+        // DEBUG: Verify certificate and key match
+        $certPath = storage_path('app/zimra/device_certificate.pem');
+        $keyPath = storage_path('app/zimra/device_private.key');
+        if (file_exists($certPath) && file_exists($keyPath)) {
+            $cert = openssl_x509_read(file_get_contents($certPath));
+            $key = openssl_pkey_get_private(file_get_contents($keyPath));
+            $certPubKey = openssl_pkey_get_public($cert);
+            $certDetails = openssl_pkey_get_details($certPubKey);
+            $keyDetails = openssl_pkey_get_details($key);
+            Log::debug('ZIMRA CloseDay - Certificate/Key verification', [
+                'cert_key_type' => $certDetails['type'] ?? 'unknown',
+                'priv_key_type' => $keyDetails['type'] ?? 'unknown',
+                'keys_match' => ($certDetails['key'] ?? '') === ($keyDetails['key'] ?? ''),
+            ]);
+        }
 
         $response = Http::withOptions([
             'cert' => storage_path('app/zimra/device_certificate.pem'),
@@ -636,6 +786,52 @@ class ZimraDeviceService
 
         $responseData = $response->json();
 
+        Log::info('ZIMRA CloseDay - Request accepted, polling for completion', [
+            'fiscal_day_no' => $fiscalDay->fiscal_day_no,
+            'operation_id' => $responseData['operationID'] ?? null
+        ]);
+
+        // Poll getStatus until FiscalDayClosed or FiscalDayCloseFailed (max 5 attempts)
+        $maxAttempts = 5;
+        $pollDelaySeconds = 3;
+        $finalStatus = null;
+
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            sleep($pollDelaySeconds);
+            
+            $statusResponse = $this->getStatus();
+            $currentStatus = $statusResponse['fiscalDayStatus'] ?? null;
+            
+            Log::info('ZIMRA CloseDay - Polling status', [
+                'attempt' => $attempt,
+                'status' => $currentStatus,
+            ]);
+
+            if ($currentStatus === 'FiscalDayClosed') {
+                $finalStatus = 'closed';
+                break;
+            }
+
+            if ($currentStatus === 'FiscalDayCloseFailed') {
+                $finalStatus = 'failed';
+                Log::error('ZIMRA CloseDay - Close failed after polling', [
+                    'error_code' => $statusResponse['fiscalDayClosingErrorCode'] ?? 'unknown',
+                ]);
+                return [
+                    'error' => true,
+                    'message' => 'Fiscal day close failed: ' . ($statusResponse['fiscalDayClosingErrorCode'] ?? 'unknown'),
+                    'zimra_status' => $statusResponse,
+                ];
+            }
+
+            // FiscalDayCloseInitiated - continue polling
+            if ($currentStatus !== 'FiscalDayCloseInitiated') {
+                Log::warning('ZIMRA CloseDay - Unexpected status during polling', [
+                    'status' => $currentStatus,
+                ]);
+            }
+        }
+
         // Update database
         $fiscalDay->update([
             'status' => 'closed',
@@ -646,12 +842,62 @@ class ZimraDeviceService
 
         Log::info('ZIMRA Fiscal Day Closed', [
             'fiscal_day_no' => $fiscalDay->fiscal_day_no,
-            'operation_id' => $responseData['operationID'] ?? null
+            'operation_id' => $responseData['operationID'] ?? null,
+            'final_status' => $finalStatus,
         ]);
 
         return [
             'success' => true,
             'data' => $responseData,
+            'fiscal_day' => $fiscalDay->fresh()
+        ];
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Force Close Fiscal Day (Local Only - No ZIMRA API call)
+    |--------------------------------------------------------------------------
+    | Use this when ZIMRA API fails and you need to manually close the day
+    */
+    public function forceCloseDay(): array
+    {
+        $zimraConfig = ZimraConfig::getActive();
+
+        if (!$zimraConfig) {
+            throw new \Exception('No active ZIMRA configuration found.');
+        }
+
+        $deviceId = $zimraConfig->device_id;
+
+        if (!$deviceId) {
+            throw new \Exception('No device ID found in configuration.');
+        }
+
+        $fiscalDay = FiscalDay::getCurrentOpen($deviceId);
+        
+        if (!$fiscalDay) {
+            return [
+                'error' => true,
+                'message' => 'No open fiscal day found to close.'
+            ];
+        }
+
+        // Force close locally without calling ZIMRA
+        $fiscalDay->update([
+            'status' => 'closed',
+            'closed_at' => now(),
+            'close_response' => ['forced' => true, 'reason' => 'Manual force close by user'],
+        ]);
+
+        Log::warning('ZIMRA Fiscal Day Force Closed (Local Only)', [
+            'fiscal_day_no' => $fiscalDay->fiscal_day_no,
+            'device_id' => $deviceId
+        ]);
+
+        return [
+            'success' => true,
+            'forced' => true,
+            'message' => 'Fiscal day force closed locally. Note: ZIMRA was not notified.',
             'fiscal_day' => $fiscalDay->fresh()
         ];
     }
@@ -751,7 +997,7 @@ class ZimraDeviceService
         }
 
         // Sign hash with ECDSA
-        openssl_sign($hashBinary, $signatureBinary, $privateKey, OPENSSL_ALGO_SHA256);
+        openssl_sign($receiptJson, $signatureBinary, $privateKey, OPENSSL_ALGO_SHA256);
 
         $signatureBase64 = base64_encode($signatureBinary);
 
@@ -830,12 +1076,12 @@ class ZimraDeviceService
                 $key = $tax['taxCode'] . '_' . ($tax['taxPercent'] ?? 0);
 
                 if (!isset($counters[$key])) {
+                    // SaleByTax counters must NOT include fiscalCounterMoneyType per ZIMRA FDMS v7.2
                     $counters[$key] = [
-                        'fiscalCounterType' => 'saleByTax',
+                        'fiscalCounterType' => 'SaleByTax',
                         'fiscalCounterCurrency' => $receiptData['receiptCurrency'] ?? 'USD',
                         'fiscalCounterTaxPercent' => $tax['taxPercent'] ?? 0,
                         'fiscalCounterTaxID' => $tax['taxID'] ?? 1,
-                        'fiscalCounterMoneyType' => 'Cash',
                         'fiscalCounterValue' => 0,
                     ];
                 }

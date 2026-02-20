@@ -236,6 +236,28 @@ class ZimraController extends Controller
 
     /*
     |--------------------------------------------------------------------------
+    | Force Close Fiscal Day (Local Only)
+    |--------------------------------------------------------------------------
+    */
+    public function forceCloseDay(ZimraDeviceService $zimra)
+    {
+        try {
+            $result = $zimra->forceCloseDay();
+            
+            if (isset($result['error']) && $result['error']) {
+                return response()->json($result, 400);
+            }
+            
+            return response()->json($result);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Get Current Fiscal Day Status
     |--------------------------------------------------------------------------
     */

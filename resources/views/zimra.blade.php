@@ -232,9 +232,35 @@
 
                             <!-- Device Status Response -->
                             <template x-if="deviceStatus">
-                                <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                                    <h4 class="font-semibold text-blue-800 mb-2">Device Status (GetStatus Response)</h4>
-                                    <pre class="text-xs bg-blue-100 p-3 rounded overflow-x-auto text-blue-900" x-text="JSON.stringify(deviceStatus, null, 2)"></pre>
+                                <div class="p-4 border rounded-lg" :class="deviceStatus.fiscalDayStatus === 'FiscalDayCloseFailed' ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'">
+                                    <h4 class="font-semibold mb-2" :class="deviceStatus.fiscalDayStatus === 'FiscalDayCloseFailed' ? 'text-red-800' : 'text-blue-800'">Device Status (GetStatus Response)</h4>
+                                    <pre class="text-xs p-3 rounded overflow-x-auto" :class="deviceStatus.fiscalDayStatus === 'FiscalDayCloseFailed' ? 'bg-red-100 text-red-900' : 'bg-blue-100 text-blue-900'" x-text="JSON.stringify(deviceStatus, null, 2)"></pre>
+                                    
+                                    <!-- Show error alert and Force Close button when fiscal day close failed -->
+                                    <template x-if="deviceStatus.fiscalDayStatus === 'FiscalDayCloseFailed'">
+                                        <div class="mt-4 space-y-3">
+                                            <div class="p-3 bg-red-100 border border-red-300 rounded-lg">
+                                                <p class="text-red-800 font-medium">Fiscal Day Close Failed</p>
+                                                <p class="text-red-700 text-sm mt-1">Error: <span x-text="deviceStatus.fiscalDayClosingErrorCode"></span></p>
+                                            </div>
+                                            <div class="flex space-x-2">
+                                                <button @click="closeFiscalDay()" :disabled="loading" class="px-4 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center space-x-2">
+                                                    <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                                    </svg>
+                                                    <span>Retry Close Day</span>
+                                                </button>
+                                                <button @click="forceCloseFiscalDay()" :disabled="loading" class="px-4 py-2 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 disabled:opacity-50 flex items-center space-x-2" title="Force close locally without ZIMRA API">
+                                                    <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                                    </svg>
+                                                    <span>Force Close (Local)</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </template>
                                 </div>
                             </template>
 
@@ -356,13 +382,22 @@
                                             </button>
                                         </template>
                                         <template x-if="fiscalDay?.is_open">
-                                            <button @click="closeFiscalDay()" :disabled="loading" class="px-4 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center space-x-2">
-                                                <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                                                </svg>
-                                                <span>Close Fiscal Day</span>
-                                            </button>
+                                            <div class="flex space-x-2">
+                                                <button @click="closeFiscalDay()" :disabled="loading" class="px-4 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center space-x-2">
+                                                    <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                                    </svg>
+                                                    <span>Close Fiscal Day</span>
+                                                </button>
+                                                <button x-show="closeDayFailed" @click="forceCloseFiscalDay()" :disabled="loading" class="px-4 py-2 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 disabled:opacity-50 flex items-center space-x-2" title="Force close locally without ZIMRA API">
+                                                    <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                                    </svg>
+                                                    <span>Force Close (Local)</span>
+                                                </button>
+                                            </div>
                                         </template>
                                     </div>
                                 </div>
@@ -645,6 +680,7 @@
                 messageType: 'success',
                 config: null,
                 fiscalDay: null,
+                closeDayFailed: false,
                 lastReceiptResponse: null,
                 
                 configForm: {
@@ -937,12 +973,48 @@
                         
                         if (res.ok && !data.error) {
                             this.showMessage('Fiscal day closed successfully!', 'success');
+                            this.closeDayFailed = false;
                             await this.loadFiscalDay();
                         } else {
-                            this.showMessage(data.error || data.message || 'Failed to close fiscal day', 'error');
+                            this.closeDayFailed = true;
+                            const errorMsg = data.body?.fiscalDayClosingErrorCode || data.body?.detail || data.error || data.message || 'Failed to close fiscal day';
+                            this.showMessage('Close failed: ' + errorMsg + '. You can use Force Close to close locally.', 'error');
                         }
                     } catch (e) {
-                        this.showMessage('An error occurred', 'error');
+                        this.closeDayFailed = true;
+                        this.showMessage('An error occurred. You can use Force Close to close locally.', 'error');
+                    }
+                    this.loading = false;
+                },
+                
+                async forceCloseFiscalDay() {
+                    if (!confirm('Force close will mark the fiscal day as closed locally WITHOUT notifying ZIMRA. This should only be used when ZIMRA API is unavailable. Continue?')) {
+                        return;
+                    }
+                    
+                    this.loading = true;
+                    try {
+                        const res = await fetch('/zimra/force-close-day', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                            }
+                        });
+                        
+                        const data = await res.json();
+                        
+                        if (res.ok && !data.error) {
+                            this.showMessage('Fiscal day force closed locally. Note: ZIMRA was not notified.', 'warning');
+                            this.closeDayFailed = false;
+                            this.deviceStatus = null;
+                            await this.loadFiscalDay();
+                            await this.getDeviceStatus();
+                        } else {
+                            this.showMessage(data.error || data.message || 'Failed to force close fiscal day', 'error');
+                        }
+                    } catch (e) {
+                        this.showMessage('An error occurred: ' + e.message, 'error');
                     }
                     this.loading = false;
                 },

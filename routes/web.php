@@ -23,6 +23,7 @@ Route::get('/zimra/device-config', [ZimraController::class, 'config']);
 Route::get('/zimra/status', [ZimraController::class, 'status']);
 Route::post('/zimra/open-day', [ZimraController::class, 'openDay']);
 Route::post('/zimra/close-day', [ZimraController::class, 'closeDay']);
+Route::post('/zimra/force-close-day', [ZimraController::class, 'forceCloseDay']);
 Route::get('/zimra/fiscal-day', [ZimraController::class, 'fiscalDayStatus']);
 Route::post('/zimra/submit-receipt', [ZimraController::class, 'submitReceipt']);
 Route::post('/zimra/submit-file', [ZimraController::class, 'submitFile']);
