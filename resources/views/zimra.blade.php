@@ -1312,6 +1312,26 @@
                 async submitReceipt() {
                     this.loading = true;
                     try {
+                        // Step 1: Call getConfig from FDMS first to ensure tax config is fresh
+                        const configRes = await fetch('/zimra/device-config', {
+                            method: 'GET',
+                            headers: {
+                                'Accept': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                            }
+                        });
+                        
+                        if (!configRes.ok) {
+                            const configErr = await configRes.json();
+                            this.showMessage(configErr.error || 'Failed to fetch FDMS config', 'error');
+                            this.loading = false;
+                            return;
+                        }
+                        
+                        const fdmsConfig = await configRes.json();
+                        console.log('FDMS Config fetched:', fdmsConfig);
+                        
+                        // Step 2: Proceed with receipt submission
                         const total = this.calculateTotal();
                         const taxAmount = total * (this.receiptForm.taxPercent / 100);
                         const counter = (this.fiscalDay?.fiscal_day?.receipt_counter || 0) + 1;
