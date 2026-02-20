@@ -6,6 +6,7 @@ use App\Models\Receipt;
 use App\Models\ZimraConfig;
 use App\Services\ZimraDeviceService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class ZimraController extends Controller
 {
@@ -82,6 +83,73 @@ class ZimraController extends Controller
         return response()->json([
             'message' => 'ZIMRA configuration updated successfully',
             'config' => $config,
+        ]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Delete ZIMRA Configuration
+    |--------------------------------------------------------------------------
+    */
+    public function deleteConfig(int $id)
+    {
+        $config = ZimraConfig::findOrFail($id);
+
+        // Delete certificate files from storage if they exist
+        Storage::delete([
+            'zimra/device_certificate.pem',
+            'zimra/device_private.key',
+            'zimra/device.csr',
+        ]);
+
+        $config->delete();
+
+        return response()->json([
+            'message' => 'ZIMRA configuration deleted successfully',
+        ]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Clear Device Registration (keeps config, removes device data)
+    |--------------------------------------------------------------------------
+    */
+    public function clearDeviceRegistration()
+    {
+        $config = ZimraConfig::getActive();
+
+        if (!$config) {
+            return response()->json([
+                'message' => 'No active ZIMRA configuration found',
+            ], 404);
+        }
+
+        // Delete certificate files from storage
+        Storage::delete([
+            'zimra/device_certificate.pem',
+            'zimra/device_private.key',
+            'zimra/device.csr',
+        ]);
+
+        // Clear device-related fields from config
+        $config->update([
+            'device_id' => null,
+            'serial_number' => null,
+            'activation_key' => null,
+            'private_key' => null,
+            'certificate' => null,
+            'qr_url' => null,
+            'taxes' => null,
+            'device_operating_mode' => null,
+            'certificate_valid_till' => null,
+            'fiscal_day_status' => null,
+            'last_receipt_global_no' => null,
+            'last_fiscal_day_no' => null,
+        ]);
+
+        return response()->json([
+            'message' => 'Device registration cleared successfully. You can now register a new device.',
+            'config' => $config->fresh(),
         ]);
     }
 

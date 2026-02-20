@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\FiscalDay;
+use App\Models\Receipt;
 use App\Models\ZimraConfig;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -147,34 +148,40 @@ class ZimraDeviceService
             throw new \Exception('No active ZIMRA configuration found. Please create one first.');
         }
 
+        /*
+        |--------------------------------------------------------------------------
+        | 1️⃣ Prepare Device Identifiers (ZIMRA v7.2 Spec)
+        |--------------------------------------------------------------------------
+        */
         $paddedId = str_pad($deviceId, 10, '0', STR_PAD_LEFT);
         $commonName = "ZIMRA-{$serialNumber}-{$paddedId}";
 
         /*
         |--------------------------------------------------------------------------
-        | 1️⃣ Generate ECC P-256 Private Key
+        | 2️⃣ Generate ECC P-256 Private Key
         |--------------------------------------------------------------------------
         */
-        // Find OpenSSL config file for Windows compatibility
         $opensslConf = $this->findOpenSSLConfig();
         
         Log::info('Starting device registration', [
             'device_id' => $deviceId,
+            'padded_device_id' => $paddedId,
             'serial_number' => $serialNumber,
+            'common_name' => $commonName,
             'openssl_conf' => $opensslConf,
             'php_binary' => PHP_BINARY
         ]);
         
-        $config = [
+        $keyConfig = [
             "private_key_type" => OPENSSL_KEYTYPE_EC,
             "curve_name" => "prime256v1",
         ];
         
         if ($opensslConf) {
-            $config["config"] = $opensslConf;
+            $keyConfig["config"] = $opensslConf;
         }
 
-        $privateKeyResource = openssl_pkey_new($config);
+        $privateKeyResource = openssl_pkey_new($keyConfig);
 
         if ($privateKeyResource === false) {
             $errors = [];
@@ -195,16 +202,27 @@ class ZimraDeviceService
 
         /*
         |--------------------------------------------------------------------------
-        | 2️⃣ Generate CSR
+        | 3️⃣ Generate CSR with ZIMRA v7.2 Distinguished Name
+        |--------------------------------------------------------------------------
+        | DN MUST be exactly:
+        |   C  = ZW
+        |   ST = Zimbabwe
+        |   O  = Zimbabwe Revenue Authority
+        |   CN = ZIMRA-{serialNumber}-{zeroPaddedDeviceId}
         |--------------------------------------------------------------------------
         */
         $dn = [
             "countryName" => "ZW",
+            "stateOrProvinceName" => "Zimbabwe",
             "organizationName" => "Zimbabwe Revenue Authority",
             "commonName" => $commonName,
         ];
 
-        $csrConfig = ["digest_alg" => "sha256"];
+        $csrConfig = [
+            "digest_alg" => "sha256",
+            "x509_extensions" => "v3_req",
+            "req_extensions" => "v3_req",
+        ];
         if ($opensslConf) {
             $csrConfig["config"] = $opensslConf;
         }
@@ -226,25 +244,65 @@ class ZimraDeviceService
             throw new \Exception('Failed to export CSR: ' . ($error ?: 'Unknown error'));
         }
 
-        Storage::put("zimra/device.csr", $csrPem);
-
         /*
         |--------------------------------------------------------------------------
-        | 3️⃣ Convert CSR to JSON Format
+        | 4️⃣ Validate CSR Before Sending
         |--------------------------------------------------------------------------
         */
-        $csrForJson = str_replace("\n", "\\n", trim($csrPem));
+        // Validate PEM format
+        if (strpos($csrPem, '-----BEGIN CERTIFICATE REQUEST-----') === false ||
+            strpos($csrPem, '-----END CERTIFICATE REQUEST-----') === false) {
+            Log::error('CSR PEM format validation failed', ['csr' => $csrPem]);
+            throw new \Exception('Generated CSR is not in valid PEM format');
+        }
+
+        // Validate and log CSR subject
+        $csrSubject = openssl_csr_get_subject($csrResource);
+        Log::info('CSR Subject (DN) verification', [
+            'C' => $csrSubject['C'] ?? 'MISSING',
+            'ST' => $csrSubject['ST'] ?? 'MISSING',
+            'O' => $csrSubject['O'] ?? 'MISSING',
+            'CN' => $csrSubject['CN'] ?? 'MISSING',
+            'full_subject' => $csrSubject
+        ]);
+
+        // Verify no default OpenSSL values leaked in
+        if (($csrSubject['ST'] ?? '') === 'Some-State') {
+            Log::error('CSR contains default OpenSSL ST value', ['subject' => $csrSubject]);
+            throw new \Exception('CSR generation failed: ST contains default "Some-State" value');
+        }
+        if (strpos($csrSubject['O'] ?? '', 'Internet Widgits') !== false) {
+            Log::error('CSR contains default OpenSSL O value', ['subject' => $csrSubject]);
+            throw new \Exception('CSR generation failed: O contains default "Internet Widgits" value');
+        }
+
+        // Verify expected values
+        if (($csrSubject['C'] ?? '') !== 'ZW') {
+            throw new \Exception('CSR validation failed: C must be ZW, got: ' . ($csrSubject['C'] ?? 'empty'));
+        }
+        if (($csrSubject['ST'] ?? '') !== 'Zimbabwe') {
+            throw new \Exception('CSR validation failed: ST must be Zimbabwe, got: ' . ($csrSubject['ST'] ?? 'empty'));
+        }
+        if (($csrSubject['O'] ?? '') !== 'Zimbabwe Revenue Authority') {
+            throw new \Exception('CSR validation failed: O must be Zimbabwe Revenue Authority, got: ' . ($csrSubject['O'] ?? 'empty'));
+        }
+        if (($csrSubject['CN'] ?? '') !== $commonName) {
+            throw new \Exception('CSR validation failed: CN must be ' . $commonName . ', got: ' . ($csrSubject['CN'] ?? 'empty'));
+        }
+
+        Storage::put("zimra/device.csr", $csrPem);
+        Log::info('CSR generated and validated successfully', ['csr_length' => strlen($csrPem)]);
 
         /*
         |--------------------------------------------------------------------------
-        | 4️⃣ Register Device
+        | 5️⃣ Register Device with ZIMRA
         |--------------------------------------------------------------------------
         */
         $baseUrl = $zimraConfig->base_url;
 
         Log::info('Sending registration request to ZIMRA', [
             'url' => "{$baseUrl}/Public/v1/{$deviceId}/RegisterDevice",
-            'csr_length' => strlen($csrForJson)
+            'csr_length' => strlen($csrPem)
         ]);
 
         $response = Http::withHeaders([
@@ -252,7 +310,7 @@ class ZimraDeviceService
             'DeviceModelVersion' => $zimraConfig->device_version,
             'Accept' => 'application/json',
         ])->post("{$baseUrl}/Public/v1/{$deviceId}/RegisterDevice", [
-            "certificateRequest" => $csrForJson,
+            "certificateRequest" => trim($csrPem),
             "activationKey" => $activationKey
         ]);
 
@@ -970,7 +1028,14 @@ class ZimraDeviceService
 
         /*
         |--------------------------------------------------------------------------
-        | 1️⃣ Generate Device Signature
+        | 1️⃣ Build & Validate Receipt with Tax Calculations
+        |--------------------------------------------------------------------------
+        */
+        $receiptData = $this->buildAndValidateReceipt($receiptData, $fiscalDay);
+
+        /*
+        |--------------------------------------------------------------------------
+        | 2️⃣ Generate Device Signature
         |--------------------------------------------------------------------------
         */
 
@@ -1009,9 +1074,18 @@ class ZimraDeviceService
 
         /*
         |--------------------------------------------------------------------------
-        | 2️⃣ Send To ZIMRA
+        | 3️⃣ Send To ZIMRA
         |--------------------------------------------------------------------------
         */
+
+        Log::info('ZIMRA SubmitReceipt Request', [
+            'device_id' => $deviceId,
+            'fiscal_day_no' => $fiscalDay->fiscal_day_no,
+            'receipt_counter' => $receiptData['receiptCounter'] ?? null,
+            'receipt_global_no' => $receiptData['receiptGlobalNo'] ?? null,
+            'receipt_total' => $receiptData['receiptTotal'] ?? null,
+            'tax_inclusive' => $receiptData['receiptLinesTaxInclusive'] ?? false,
+        ]);
 
         $response = Http::withOptions([
             'cert' => storage_path('app/zimra/device_certificate.pem'),
@@ -1025,37 +1099,359 @@ class ZimraDeviceService
             'receipt' => $receiptData
         ]);
 
+        /*
+        |--------------------------------------------------------------------------
+        | 4️⃣ Log Full Raw FDMS Response
+        |--------------------------------------------------------------------------
+        */
+        $rawResponseBody = $response->body();
+        $responseData = $response->json();
+
+        Log::info('ZIMRA SubmitReceipt Raw Response', [
+            'status' => $response->status(),
+            'raw_body' => $rawResponseBody
+        ]);
+
+        Log::info('ZIMRA SubmitReceipt Parsed Response', [
+            'status' => $response->status(),
+            'successful' => $response->successful(),
+            'response' => $responseData
+        ]);
+
         if (!$response->successful()) {
             Log::error('ZIMRA SubmitReceipt Failed', [
                 'status' => $response->status(),
-                'body' => $response->json()
+                'body' => $responseData,
+                'error_code' => $responseData['errorCode'] ?? null,
+                'detail' => $responseData['detail'] ?? null,
             ]);
             return [
                 'error' => true,
                 'status' => $response->status(),
-                'body' => $response->json()
+                'body' => $responseData
             ];
         }
 
-        $responseData = $response->json();
+        /*
+        |--------------------------------------------------------------------------
+        | 5️⃣ Check for Validation Errors
+        |--------------------------------------------------------------------------
+        */
+        $validationErrors = $responseData['validationErrors'] ?? [];
+        $receiptValidationCode = $responseData['receiptValidationCode'] ?? null;
+        $fdmsReceiptId = $responseData['receiptID'] ?? null;
+        $isValid = empty($validationErrors) && !in_array($receiptValidationCode, ['Grey', 'Red']);
+
+        // Log each validation error individually
+        if (!empty($validationErrors)) {
+            Log::error('ZIMRA Receipt Validation Errors Detected', [
+                'receipt_id' => $fdmsReceiptId,
+                'validation_code' => $receiptValidationCode,
+                'error_count' => count($validationErrors)
+            ]);
+
+            foreach ($validationErrors as $index => $error) {
+                Log::error("ZIMRA Validation Error #{$index}", [
+                    'errorCode' => $error['errorCode'] ?? 'UNKNOWN',
+                    'errorMessage' => $error['errorMessage'] ?? $error['message'] ?? 'No message',
+                    'field' => $error['field'] ?? null,
+                    'receipt_id' => $fdmsReceiptId,
+                ]);
+            }
+        }
 
         /*
         |--------------------------------------------------------------------------
-        | 3️⃣ Update Fiscal Day Counters
+        | 6️⃣ Save Receipt with Validation Status to Database
+        |--------------------------------------------------------------------------
+        */
+        $primaryTax = $receiptData['receiptTaxes'][0] ?? [];
+
+        $receipt = Receipt::create([
+            'device_id' => $deviceId,
+            'invoice_no' => $receiptData['invoiceNo'] ?? 'N/A',
+            'receipt_type' => $receiptData['receiptType'] ?? 'FiscalInvoice',
+            'receipt_currency' => $receiptData['receiptCurrency'] ?? 'USD',
+            'receipt_counter' => $receiptData['receiptCounter'],
+            'receipt_global_no' => $receiptData['receiptGlobalNo'],
+            'fiscal_day_no' => $receiptData['fiscalDayNo'],
+            'receipt_total' => $receiptData['receiptTotal'],
+            'tax_amount' => $primaryTax['taxAmount'] ?? 0,
+            'tax_code' => $primaryTax['taxCode'] ?? 'A',
+            'tax_percent' => $primaryTax['taxPercent'] ?? 0,
+            'payment_method' => $receiptData['receiptPayments'][0]['moneyTypeCode'] ?? 'Cash',
+            'receipt_lines' => $receiptData['receiptLines'],
+            'receipt_taxes' => $receiptData['receiptTaxes'],
+            'receipt_payments' => $receiptData['receiptPayments'],
+            'receipt_hash' => $receiptData['receiptDeviceSignature']['hash'] ?? null,
+            'receipt_signature' => $receiptData['receiptDeviceSignature'] ?? null,
+            'zimra_response' => $responseData,
+            'receipt_date' => $receiptData['receiptDate'] ?? now(),
+            'validation_code' => $receiptValidationCode,
+            'validation_errors' => $validationErrors,
+            'is_valid' => $isValid,
+            'fdms_receipt_id' => $fdmsReceiptId,
+        ]);
+
+        Log::info('Receipt Saved to Database', [
+            'receipt_id' => $receipt->id,
+            'fdms_receipt_id' => $fdmsReceiptId,
+            'is_valid' => $isValid,
+            'validation_code' => $receiptValidationCode,
+        ]);
+
+        /*
+        |--------------------------------------------------------------------------
+        | 7️⃣ Throw Exception if Validation Errors Exist (Block CloseDay)
+        |--------------------------------------------------------------------------
+        */
+        if (!empty($validationErrors)) {
+            $errorSummary = collect($validationErrors)->map(function ($e) {
+                return ($e['errorCode'] ?? 'UNKNOWN') . ': ' . ($e['errorMessage'] ?? $e['message'] ?? 'No message');
+            })->implode('; ');
+
+            Log::error('ZIMRA Receipt Invalid - CloseDay Blocked', [
+                'receipt_id' => $fdmsReceiptId,
+                'validation_code' => $receiptValidationCode,
+                'error_summary' => $errorSummary,
+                'db_receipt_id' => $receipt->id,
+            ]);
+
+            throw new \Exception(
+                "ZIMRA Receipt Validation Failed [{$receiptValidationCode}]: {$errorSummary}. " .
+                "Receipt saved to database (ID: {$receipt->id}). CloseDay will fail with this receipt."
+            );
+        }
+
+        // Also throw if Grey or Red even without explicit errors
+        if ($receiptValidationCode === 'Grey' || $receiptValidationCode === 'Red') {
+            Log::error('ZIMRA Receipt Marked Invalid (Grey/Red)', [
+                'receipt_id' => $fdmsReceiptId,
+                'validation_code' => $receiptValidationCode,
+                'db_receipt_id' => $receipt->id,
+            ]);
+
+            throw new \Exception(
+                "ZIMRA Receipt marked as {$receiptValidationCode}. " .
+                "Receipt saved to database (ID: {$receipt->id}). CloseDay will fail with this receipt."
+            );
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | 8️⃣ Update Fiscal Day Counters (Only if Valid)
         |--------------------------------------------------------------------------
         */
         $this->updateFiscalCounters($fiscalDay, $receiptData);
 
-        Log::info('ZIMRA Receipt Submitted', [
-            'receipt_id' => $responseData['receiptID'] ?? null,
-            'fiscal_day_no' => $fiscalDay->fiscal_day_no
+        Log::info('ZIMRA Receipt Submitted Successfully', [
+            'receipt_id' => $fdmsReceiptId,
+            'db_receipt_id' => $receipt->id,
+            'fiscal_day_no' => $fiscalDay->fiscal_day_no,
+            'validation_code' => $receiptValidationCode,
+            'receipt_counter' => $receiptData['receiptCounter'],
+            'receipt_global_no' => $receiptData['receiptGlobalNo'],
         ]);
 
         return [
             'success' => true,
             'data' => $responseData,
-            'fiscal_day_no' => $fiscalDay->fiscal_day_no
+            'fiscal_day_no' => $fiscalDay->fiscal_day_no,
+            'validation_code' => $receiptValidationCode,
+            'db_receipt_id' => $receipt->id,
         ];
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Build & Validate Receipt with Tax Calculations
+    |--------------------------------------------------------------------------
+    | Handles tax-inclusive vs tax-exclusive calculations per ZIMRA spec.
+    | Default: receiptLinesTaxInclusive = false
+    |--------------------------------------------------------------------------
+    */
+    private function buildAndValidateReceipt(array $receiptData, FiscalDay $fiscalDay): array
+    {
+        // Default to tax-exclusive unless explicitly set
+        $taxInclusive = $receiptData['receiptLinesTaxInclusive'] ?? false;
+        $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
+
+        Log::debug('Receipt Tax Mode', ['tax_inclusive' => $taxInclusive]);
+
+        /*
+        |--------------------------------------------------------------------------
+        | Calculate Line Totals & Taxes
+        |--------------------------------------------------------------------------
+        */
+        $receiptLines = $receiptData['receiptLines'] ?? [];
+        $taxTotals = []; // Group by taxCode
+        $calculatedReceiptTotal = 0;
+
+        foreach ($receiptLines as $index => &$line) {
+            $price = (float) ($line['receiptLinePrice'] ?? 0);
+            $quantity = (float) ($line['receiptLineQuantity'] ?? 1);
+            $taxPercent = (float) ($line['taxPercent'] ?? 0);
+            $taxCode = $line['taxCode'] ?? 'A';
+            $taxID = $line['taxID'] ?? 1;
+
+            if ($taxInclusive) {
+                // receiptLineTotal already includes tax
+                $lineTotal = $price * $quantity;
+                $taxAmount = $lineTotal * $taxPercent / (100 + $taxPercent);
+                $salesAmountWithTax = $lineTotal;
+            } else {
+                // receiptLineTotal is tax-exclusive, add tax on top
+                $lineTotal = $price * $quantity;
+                $taxAmount = $lineTotal * $taxPercent / 100;
+                $salesAmountWithTax = $lineTotal + $taxAmount;
+            }
+
+            // Round to 2 decimal places
+            $lineTotal = round($lineTotal, 2);
+            $taxAmount = round($taxAmount, 2);
+            $salesAmountWithTax = round($salesAmountWithTax, 2);
+
+            // Update line
+            $line['receiptLineTotal'] = $lineTotal;
+
+            // Accumulate tax totals by taxCode
+            $taxKey = "{$taxCode}_{$taxPercent}_{$taxID}";
+            if (!isset($taxTotals[$taxKey])) {
+                $taxTotals[$taxKey] = [
+                    'taxCode' => $taxCode,
+                    'taxPercent' => $taxPercent,
+                    'taxID' => $taxID,
+                    'taxAmount' => 0,
+                    'salesAmountWithTax' => 0,
+                ];
+            }
+            $taxTotals[$taxKey]['taxAmount'] += $taxAmount;
+            $taxTotals[$taxKey]['salesAmountWithTax'] += $salesAmountWithTax;
+
+            // Accumulate receipt total
+            $calculatedReceiptTotal += $salesAmountWithTax;
+
+            Log::debug('Receipt Line Calculation', [
+                'line_no' => $line['receiptLineNo'] ?? $index + 1,
+                'price' => $price,
+                'quantity' => $quantity,
+                'tax_percent' => $taxPercent,
+                'tax_inclusive' => $taxInclusive,
+                'line_total' => $lineTotal,
+                'tax_amount' => $taxAmount,
+                'sales_amount_with_tax' => $salesAmountWithTax,
+            ]);
+        }
+        unset($line);
+
+        $receiptData['receiptLines'] = $receiptLines;
+
+        // Round accumulated totals
+        foreach ($taxTotals as &$tax) {
+            $tax['taxAmount'] = round($tax['taxAmount'], 2);
+            $tax['salesAmountWithTax'] = round($tax['salesAmountWithTax'], 2);
+        }
+        unset($tax);
+
+        $receiptData['receiptTaxes'] = array_values($taxTotals);
+        $calculatedReceiptTotal = round($calculatedReceiptTotal, 2);
+
+        Log::debug('Receipt Tax Totals', [
+            'taxes' => $receiptData['receiptTaxes'],
+            'calculated_receipt_total' => $calculatedReceiptTotal,
+        ]);
+
+        /*
+        |--------------------------------------------------------------------------
+        | Set Receipt Total
+        |--------------------------------------------------------------------------
+        */
+        $receiptData['receiptTotal'] = $calculatedReceiptTotal;
+
+        /*
+        |--------------------------------------------------------------------------
+        | Validate Counters
+        |--------------------------------------------------------------------------
+        */
+        $expectedCounter = ($fiscalDay->receipt_counter ?? 0) + 1;
+        $receiptCounter = $receiptData['receiptCounter'] ?? $expectedCounter;
+        $receiptGlobalNo = $receiptData['receiptGlobalNo'] ?? $expectedCounter;
+
+        // Auto-set if not provided
+        $receiptData['receiptCounter'] = $receiptCounter;
+        $receiptData['receiptGlobalNo'] = $receiptGlobalNo;
+
+        Log::debug('Receipt Counters', [
+            'expected_counter' => $expectedCounter,
+            'receipt_counter' => $receiptCounter,
+            'receipt_global_no' => $receiptGlobalNo,
+        ]);
+
+        /*
+        |--------------------------------------------------------------------------
+        | Validate Payments Match Total
+        |--------------------------------------------------------------------------
+        */
+        $payments = $receiptData['receiptPayments'] ?? [];
+        $totalPayments = 0;
+
+        foreach ($payments as $payment) {
+            $totalPayments += (float) ($payment['paymentAmount'] ?? 0);
+        }
+        $totalPayments = round($totalPayments, 2);
+
+        Log::debug('Receipt Payments Validation', [
+            'receipt_total' => $calculatedReceiptTotal,
+            'total_payments' => $totalPayments,
+            'payment_count' => count($payments),
+        ]);
+
+        if (abs($totalPayments - $calculatedReceiptTotal) > 0.01) {
+            Log::error('Receipt Payment Mismatch', [
+                'receipt_total' => $calculatedReceiptTotal,
+                'total_payments' => $totalPayments,
+                'difference' => $calculatedReceiptTotal - $totalPayments,
+            ]);
+            throw new \Exception(
+                "Payment mismatch: receiptTotal ({$calculatedReceiptTotal}) != sum of payments ({$totalPayments})"
+            );
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | Validate salesAmountWithTax Sum Matches receiptTotal
+        |--------------------------------------------------------------------------
+        */
+        $totalSalesWithTax = 0;
+        foreach ($receiptData['receiptTaxes'] as $tax) {
+            $totalSalesWithTax += $tax['salesAmountWithTax'];
+        }
+        $totalSalesWithTax = round($totalSalesWithTax, 2);
+
+        Log::debug('Receipt Tax Total Validation', [
+            'receipt_total' => $calculatedReceiptTotal,
+            'sum_sales_with_tax' => $totalSalesWithTax,
+        ]);
+
+        if (abs($totalSalesWithTax - $calculatedReceiptTotal) > 0.01) {
+            Log::error('Receipt Tax Sum Mismatch', [
+                'receipt_total' => $calculatedReceiptTotal,
+                'sum_sales_with_tax' => $totalSalesWithTax,
+                'difference' => $calculatedReceiptTotal - $totalSalesWithTax,
+            ]);
+            throw new \Exception(
+                "Tax mismatch: receiptTotal ({$calculatedReceiptTotal}) != sum of salesAmountWithTax ({$totalSalesWithTax})"
+            );
+        }
+
+        Log::info('Receipt Validated Successfully', [
+            'receipt_total' => $calculatedReceiptTotal,
+            'tax_inclusive' => $taxInclusive,
+            'line_count' => count($receiptLines),
+            'tax_groups' => count($receiptData['receiptTaxes']),
+        ]);
+
+        return $receiptData;
     }
 
     /*

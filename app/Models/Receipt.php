@@ -28,6 +28,10 @@ class Receipt extends Model
         'verification_code',
         'zimra_response',
         'receipt_date',
+        'validation_code',
+        'validation_errors',
+        'is_valid',
+        'fdms_receipt_id',
     ];
 
     protected $casts = [
@@ -36,9 +40,11 @@ class Receipt extends Model
         'receipt_payments' => 'array',
         'receipt_signature' => 'array',
         'zimra_response' => 'array',
+        'validation_errors' => 'array',
         'receipt_date' => 'datetime',
         'receipt_total' => 'decimal:2',
         'tax_amount' => 'decimal:2',
         'tax_percent' => 'decimal:2',
+        'is_valid' => 'boolean',
     ];
 }

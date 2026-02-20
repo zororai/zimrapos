@@ -174,7 +174,15 @@
 
                     <template x-if="config">
                         <div class="mt-8 p-4 bg-gray-50 rounded-lg">
-                            <h3 class="text-sm font-semibold text-gray-700 mb-3">Current Configuration</h3>
+                            <div class="flex items-center justify-between mb-3">
+                                <h3 class="text-sm font-semibold text-gray-700">Current Configuration</h3>
+                                <button @click="deleteConfig()" :disabled="loading" class="px-3 py-1 bg-red-600 text-white text-sm font-medium rounded hover:bg-red-700 disabled:opacity-50 flex items-center space-x-1">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                                    </svg>
+                                    <span>Delete Configuration</span>
+                                </button>
+                            </div>
                             <div class="grid grid-cols-2 gap-4 text-sm">
                                 <div><span class="text-gray-500">Base URL:</span> <span class="font-medium" x-text="config.base_url"></span></div>
                                 <div><span class="text-gray-500">Device Model:</span> <span class="font-medium" x-text="config.device_model"></span></div>
@@ -219,6 +227,12 @@
                                                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                                             </svg>
                                             <span>Get Status</span>
+                                        </button>
+                                        <button @click="clearDeviceRegistration()" :disabled="loading" class="px-3 py-1 bg-red-600 text-white text-sm font-medium rounded hover:bg-red-700 disabled:opacity-50 flex items-center space-x-1">
+                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                                            </svg>
+                                            <span>Clear Registration</span>
                                         </button>
                                     </div>
                                 </div>
@@ -1200,6 +1214,79 @@
                     this.message = msg;
                     this.messageType = type;
                     setTimeout(() => { this.message = ''; }, 5000);
+                },
+
+                async deleteConfig() {
+                    if (!this.config) {
+                        this.showMessage('No configuration to delete', 'error');
+                        return;
+                    }
+                    
+                    if (!confirm('Are you sure you want to delete the ZIMRA configuration? This will remove all settings, device registration, and certificates. This action cannot be undone.')) {
+                        return;
+                    }
+                    
+                    this.loading = true;
+                    try {
+                        const res = await fetch(`/zimra/config/${this.config.id}`, {
+                            method: 'DELETE',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                            }
+                        });
+                        
+                        const data = await res.json();
+                        
+                        if (res.ok) {
+                            this.showMessage('Configuration deleted successfully!', 'success');
+                            this.config = null;
+                            this.configForm = { base_url: '', device_model: '', device_version: '' };
+                            this.fiscalDay = null;
+                            this.deviceStatus = null;
+                        } else {
+                            this.showMessage(data.message || 'Failed to delete configuration', 'error');
+                        }
+                    } catch (e) {
+                        this.showMessage('An error occurred: ' + e.message, 'error');
+                    }
+                    this.loading = false;
+                },
+
+                async clearDeviceRegistration() {
+                    if (!this.config?.device_id) {
+                        this.showMessage('No device registration to clear', 'error');
+                        return;
+                    }
+                    
+                    if (!confirm('Are you sure you want to clear the device registration? This will remove the device ID, certificates, and all device-related data. You will need to register a new device. This action cannot be undone.')) {
+                        return;
+                    }
+                    
+                    this.loading = true;
+                    try {
+                        const res = await fetch('/zimra/device-registration', {
+                            method: 'DELETE',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                            }
+                        });
+                        
+                        const data = await res.json();
+                        
+                        if (res.ok) {
+                            this.showMessage('Device registration cleared successfully! You can now register a new device.', 'success');
+                            await this.loadConfig();
+                            this.fiscalDay = null;
+                            this.deviceStatus = null;
+                        } else {
+                            this.showMessage(data.message || 'Failed to clear device registration', 'error');
+                        }
+                    } catch (e) {
+                        this.showMessage('An error occurred: ' + e.message, 'error');
+                    }
+                    this.loading = false;
                 }
             };
         }

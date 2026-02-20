@@ -15,6 +15,8 @@ Route::get('/zimra', function () {
 Route::post('/zimra/config', [ZimraController::class, 'storeConfig']);
 Route::get('/zimra/config', [ZimraController::class, 'getActiveConfig']);
 Route::put('/zimra/config/{id}', [ZimraController::class, 'updateConfig']);
+Route::delete('/zimra/config/{id}', [ZimraController::class, 'deleteConfig']);
+Route::delete('/zimra/device-registration', [ZimraController::class, 'clearDeviceRegistration']);
 
 // ZIMRA Device Routes
 Route::post('/zimra/register', [ZimraController::class, 'register']);
