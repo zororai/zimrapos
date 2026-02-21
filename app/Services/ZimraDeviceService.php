@@ -1409,41 +1409,55 @@ class ZimraDeviceService
         | 5️⃣ Build Canonical Receipt Structure (Fix RCPT020/RCPT025)
         |--------------------------------------------------------------------------
         | Build the exact payload that will be signed AND sent - no re-encoding
+        | NOTE: fiscalDayNo is NOT included in receipt - FDMS determines from openDay state
         |--------------------------------------------------------------------------
         */
-        // Set fiscal day number from FDMS
-        $receiptData['fiscalDayNo'] = $fiscalDayNo;
-        
-        // Build canonical receipt with BCMath precision (no float casting)
+        // Build canonical receipt (fiscalDayNo is NOT included per FDMS v7.2)
         $canonicalReceipt = $this->buildCanonicalReceiptPayload($receiptData, $fdmsTaxes);
         
         /*
         |--------------------------------------------------------------------------
-        | 6️⃣ JSON Encode ONCE, Sign, Then Send Exact Same JSON
+        | 6️⃣ Validate Receipt Totals (RCPT020 Prevention)
         |--------------------------------------------------------------------------
         */
-        // Step 1: Encode receipt WITHOUT signature
-        $jsonBeforeSignature = json_encode(
-            ['receipt' => $canonicalReceipt],
-            JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION
-        );
-        
-        Log::info('JSON_BEFORE_SIGNING', ['json' => $jsonBeforeSignature]);
-        
-        // Step 2: Calculate hash and signature from the receipt object (not full payload)
+        $this->validateReceiptTotals($canonicalReceipt);
+
+        /*
+        |--------------------------------------------------------------------------
+        | 7️⃣ JSON Encode ONCE, Sign, Then Send Exact Same JSON
+        |--------------------------------------------------------------------------
+        | CRITICAL: Sign receipt object ONLY, then include deviceID at root level
+        | Payload structure: {"deviceID": <id>, "receipt": {..., "receiptDeviceSignature": {...}}}
+        |--------------------------------------------------------------------------
+        */
+        // Step 1: Encode receipt WITHOUT signature - this is EXACTLY what gets signed
         $receiptJson = json_encode($canonicalReceipt, JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
+        
+        Log::info('JSON_BEFORE_SIGNING', [
+            'json' => $receiptJson,
+            'length' => strlen($receiptJson),
+        ]);
+        
+        // Step 2: Sign the raw JSON string (receipt only, not deviceID)
         $signatureData = $this->signJsonString($receiptJson);
         
-        // Step 3: Add signature to canonical receipt
+        // Step 3: Add signature to canonical receipt ARRAY (not re-encode)
         $canonicalReceipt['receiptDeviceSignature'] = $signatureData;
         
-        // Step 4: Encode FINAL payload with signature - this is what gets sent
-        $finalJson = json_encode(
-            ['receipt' => $canonicalReceipt],
-            JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION
-        );
+        // Step 4: Build FINAL payload with deviceID at root level
+        // CRITICAL: deviceID must be at root, receipt object contains signature
+        $finalPayload = [
+            'deviceID' => (int) $deviceId,
+            'receipt' => $canonicalReceipt,
+        ];
         
-        Log::info('FINAL_JSON_SENT', ['json' => $finalJson]);
+        $finalJson = json_encode($finalPayload, JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
+        
+        Log::info('FINAL_JSON_SENT', [
+            'json' => $finalJson,
+            'length' => strlen($finalJson),
+            'device_id' => $deviceId,
+        ]);
         
         // Debug: Write payload to file for inspection
         $debugDir = storage_path('app/zimra/debug');
@@ -1453,22 +1467,43 @@ class ZimraDeviceService
         $timestamp = date('Y-m-d_H-i-s');
         $invoiceNo = $canonicalReceipt['invoiceNo'] ?? 'unknown';
         
-        // Write JSON before signing (what gets hashed)
+        // Write JSON that was signed (receipt only, before signature added)
         file_put_contents(
-            "{$debugDir}/receipt_{$timestamp}_{$invoiceNo}_before_sign.json",
-            json_encode($canonicalReceipt, JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION | JSON_PRETTY_PRINT)
+            "{$debugDir}/receipt_{$timestamp}_{$invoiceNo}_signed.json",
+            $receiptJson
         );
         
-        // Write final JSON sent to FDMS
+        // Write final JSON sent to FDMS (with deviceID and signature)
         file_put_contents(
             "{$debugDir}/receipt_{$timestamp}_{$invoiceNo}_final.json",
-            json_encode(json_decode($finalJson), JSON_PRETTY_PRINT)
+            json_encode($finalPayload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION)
+        );
+        
+        // Write debug summary
+        $debugSummary = [
+            'timestamp' => $timestamp,
+            'device_id' => $deviceId,
+            'invoice_no' => $invoiceNo,
+            'receipt_total' => $canonicalReceipt['receiptTotal'],
+            'tax_amount' => $canonicalReceipt['receiptTaxes'][0]['taxAmount'] ?? 0,
+            'payment_amount' => $canonicalReceipt['receiptPayments'][0]['paymentAmount'] ?? 0,
+            'hash' => $signatureData['hash'],
+            'signature' => $signatureData['signature'],
+            'signed_json_length' => strlen($receiptJson),
+            'final_json_length' => strlen($finalJson),
+        ];
+        file_put_contents(
+            "{$debugDir}/receipt_{$timestamp}_{$invoiceNo}_debug.json",
+            json_encode($debugSummary, JSON_PRETTY_PRINT)
         );
         
         Log::info('DEBUG_FILES_CREATED', [
             'directory' => $debugDir,
+            'device_id' => $deviceId,
             'invoice_no' => $invoiceNo,
-            'timestamp' => $timestamp,
+            'receipt_total' => $canonicalReceipt['receiptTotal'],
+            'tax_amount' => $canonicalReceipt['receiptTaxes'][0]['taxAmount'] ?? 0,
+            'payment_amount' => $canonicalReceipt['receiptPayments'][0]['paymentAmount'] ?? 0,
         ]);
         
         // Store receiptData for database saving later
@@ -1616,7 +1651,7 @@ class ZimraDeviceService
             'receipt_currency' => $receiptData['receiptCurrency'] ?? 'USD',
             'receipt_counter' => $receiptData['receiptCounter'],
             'receipt_global_no' => $receiptData['receiptGlobalNo'],
-            'fiscal_day_no' => $receiptData['fiscalDayNo'],
+            'fiscal_day_no' => $fiscalDayNo,
             'receipt_total' => $receiptData['receiptTotal'],
             'tax_amount' => $primaryTax['taxAmount'] ?? 0,
             'tax_code' => $primaryTax['taxCode'] ?? 'A',
