@@ -152,7 +152,7 @@
                     <button @click="activeTab = 'device'" class="px-6 py-4 text-sm font-medium border-b-2 transition-colors" :class="activeTab === 'device' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
                         Device Registration
                     </button>
-                    <button @click="activeTab = 'fiscal'" class="px-6 py-4 text-sm font-medium border-b-2 transition-colors" :class="activeTab === 'fiscal' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
+                    <button @click="activeTab = 'fiscal'; syncFiscalDayWithFDMS()" class="px-6 py-4 text-sm font-medium border-b-2 transition-colors" :class="activeTab === 'fiscal' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
                         Fiscal Day
                     </button>
                     <button @click="activeTab = 'receipts'" class="px-6 py-4 text-sm font-medium border-b-2 transition-colors" :class="activeTab === 'receipts' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
@@ -466,22 +466,48 @@
 
                     <template x-if="config?.device_id">
                         <div class="space-y-6">
+                            <!-- FDMS Status Display -->
+                            <template x-if="deviceStatus">
+                                <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                    <h4 class="font-semibold text-blue-800 mb-2">FDMS Status</h4>
+                                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                        <div>
+                                            <span class="text-blue-600">Status:</span>
+                                            <span class="font-medium" :class="deviceStatus.fiscalDayStatus === 'FiscalDayOpened' ? 'text-green-700' : 'text-gray-700'" x-text="deviceStatus.fiscalDayStatus"></span>
+                                        </div>
+                                        <div>
+                                            <span class="text-blue-600">Fiscal Day #:</span>
+                                            <span class="font-medium text-gray-700" x-text="deviceStatus.lastFiscalDayNo"></span>
+                                        </div>
+                                        <div>
+                                            <span class="text-blue-600">Last Receipt #:</span>
+                                            <span class="font-medium text-gray-700" x-text="deviceStatus.lastReceiptGlobalNo"></span>
+                                        </div>
+                                        <div>
+                                            <span class="text-blue-600">Operation ID:</span>
+                                            <span class="font-medium text-gray-700 text-xs" x-text="deviceStatus.operationID"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+
                             <!-- Current Status -->
-                            <div class="p-6 rounded-lg" :class="fiscalDay?.is_open ? 'bg-green-50 border border-green-200' : 'bg-gray-50 border border-gray-200'">
+                            <div class="p-6 rounded-lg" :class="deviceStatus?.fiscalDayStatus === 'FiscalDayOpened' ? 'bg-green-50 border border-green-200' : 'bg-gray-50 border border-gray-200'">
                                 <div class="flex items-center justify-between">
                                     <div>
-                                        <h3 class="text-lg font-semibold" :class="fiscalDay?.is_open ? 'text-green-800' : 'text-gray-800'" x-text="fiscalDay?.is_open ? 'Fiscal Day #' + fiscalDay.fiscal_day?.fiscal_day_no + ' is Open' : 'No Open Fiscal Day'"></h3>
-                                        <p class="text-sm mt-1" :class="fiscalDay?.is_open ? 'text-green-600' : 'text-gray-600'">
-                                            <template x-if="fiscalDay?.is_open">
-                                                <span>Opened at: <span x-text="new Date(fiscalDay.fiscal_day?.opened_at).toLocaleString()"></span> | Receipts: <span x-text="fiscalDay.fiscal_day?.receipt_counter || 0"></span></span>
+                                        <h3 class="text-lg font-semibold" :class="deviceStatus?.fiscalDayStatus === 'FiscalDayOpened' ? 'text-green-800' : 'text-gray-800'" x-text="deviceStatus?.fiscalDayStatus === 'FiscalDayOpened' ? 'Fiscal Day #' + deviceStatus.lastFiscalDayNo + ' is Open' : 'No Open Fiscal Day'"></h3>
+                                        <p class="text-sm mt-1" :class="deviceStatus?.fiscalDayStatus === 'FiscalDayOpened' ? 'text-green-600' : 'text-gray-600'">
+                                            <template x-if="deviceStatus?.fiscalDayStatus === 'FiscalDayOpened'">
+                                                <span>Opened at: <span x-text="fiscalDay?.fiscal_day?.opened_at ? new Date(fiscalDay.fiscal_day.opened_at).toLocaleString() : 'N/A'"></span> | Receipts: <span x-text="deviceStatus?.lastReceiptGlobalNo || 0"></span></span>
                                             </template>
-                                            <template x-if="!fiscalDay?.is_open">
+                                            <template x-if="deviceStatus?.fiscalDayStatus !== 'FiscalDayOpened'">
                                                 <span>Open a new fiscal day to start processing receipts</span>
                                             </template>
                                         </p>
                                     </div>
                                     <div class="flex space-x-3">
-                                        <template x-if="!fiscalDay?.is_open">
+                                        <!-- Show Open Day button when FDMS status is NOT FiscalDayOpened -->
+                                        <template x-if="deviceStatus?.fiscalDayStatus !== 'FiscalDayOpened'">
                                             <button @click="openFiscalDay()" :disabled="loading" class="px-4 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center space-x-2">
                                                 <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
                                                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -490,7 +516,8 @@
                                                 <span>Open Fiscal Day</span>
                                             </button>
                                         </template>
-                                        <template x-if="fiscalDay?.is_open">
+                                        <!-- Show Close Day button when FDMS status IS FiscalDayOpened -->
+                                        <template x-if="deviceStatus?.fiscalDayStatus === 'FiscalDayOpened'">
                                             <div class="flex space-x-2">
                                                 <button @click="closeFiscalDay()" :disabled="loading" class="px-4 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center space-x-2">
                                                     <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
@@ -1041,6 +1068,45 @@
                         }
                     } catch (e) {
                         this.showMessage('An error occurred: ' + e.message, 'error');
+                    }
+                    this.loading = false;
+                },
+
+                async syncFiscalDayWithFDMS() {
+                    if (!this.config?.device_id) {
+                        return; // No device registered yet
+                    }
+                    
+                    this.loading = true;
+                    try {
+                        // Call sync endpoint which gets FDMS status and updates database
+                        const res = await fetch('/zimra/sync-fiscal-day', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                            }
+                        });
+                        
+                        const data = await res.json();
+                        console.log('Sync fiscal day response:', data);
+                        
+                        if (res.ok && !data.error) {
+                            // Update local state with synced data
+                            this.deviceStatus = data.fdms_status;
+                            this.fiscalDay = data.fiscal_day;
+                            
+                            if (data.fdms_status?.fiscalDayStatus === 'FiscalDayOpened') {
+                                this.showMessage('Fiscal Day #' + data.fdms_status.lastFiscalDayNo + ' is Open (synced with FDMS)', 'success');
+                            } else {
+                                this.showMessage('Fiscal Day Status: ' + (data.fdms_status?.fiscalDayStatus || 'Unknown'), 'info');
+                            }
+                        } else {
+                            this.showMessage(data.error || data.message || 'Failed to sync with FDMS', 'error');
+                        }
+                    } catch (e) {
+                        console.error('Sync fiscal day error:', e);
+                        this.showMessage('Failed to sync with FDMS: ' + e.message, 'error');
                     }
                     this.loading = false;
                 },

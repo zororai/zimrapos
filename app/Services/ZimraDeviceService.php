@@ -1316,9 +1316,17 @@ class ZimraDeviceService
 
         // Verify fiscal day is open on FDMS
         if ($fdmsFiscalDayStatus !== 'FiscalDayOpened') {
-            throw new \Exception(
-                "FDMS fiscal day not open. Current status: {$fdmsFiscalDayStatus}"
-            );
+            $errorMsg = "RCPT021: FDMS fiscal day not open. Current status: {$fdmsFiscalDayStatus}. ";
+            
+            if ($fdmsFiscalDayStatus === 'FiscalDayClosed' || $fdmsFiscalDayStatus === 'FiscalDayNotOpened') {
+                $errorMsg .= "Please open a fiscal day before submitting receipts.";
+            } elseif ($fdmsFiscalDayStatus === 'FiscalDayCloseFailed') {
+                $errorMsg .= "Previous fiscal day close failed. Resolve this on FDMS portal before opening a new day.";
+            } elseif ($fdmsFiscalDayStatus === 'FiscalDayCloseInitiated') {
+                $errorMsg .= "Fiscal day close is in progress. Wait for it to complete.";
+            }
+            
+            throw new \Exception($errorMsg);
         }
 
         // Use FDMS fiscal day number
@@ -1412,8 +1420,12 @@ class ZimraDeviceService
         | NOTE: fiscalDayNo is NOT included in receipt - FDMS determines from openDay state
         |--------------------------------------------------------------------------
         */
-        // Build canonical receipt (fiscalDayNo is NOT included per FDMS v7.2)
-        $canonicalReceipt = $this->buildCanonicalReceiptPayload($receiptData, $fdmsTaxes);
+        // Build canonical receipt using BCMath for precision
+        $canonicalReceipt = $this->buildAndValidateReceiptBCMath(
+            $receiptData,
+            $fiscalDayNo,
+            $fdmsTaxes
+        );
         
         /*
         |--------------------------------------------------------------------------
@@ -1431,7 +1443,8 @@ class ZimraDeviceService
         |--------------------------------------------------------------------------
         */
         // Step 1: Encode receipt WITHOUT signature - this is EXACTLY what gets signed
-        $receiptJson = json_encode($canonicalReceipt, JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
+        // DO NOT use JSON_PRESERVE_ZERO_FRACTION - values are already formatted strings
+        $receiptJson = json_encode($canonicalReceipt, JSON_UNESCAPED_SLASHES);
         
         Log::info('JSON_BEFORE_SIGNING', [
             'json' => $receiptJson,
@@ -1451,7 +1464,7 @@ class ZimraDeviceService
             'receipt' => $canonicalReceipt,
         ];
         
-        $finalJson = json_encode($finalPayload, JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
+        $finalJson = json_encode($finalPayload, JSON_UNESCAPED_SLASHES);
         
         Log::info('FINAL_JSON_SENT', [
             'json' => $finalJson,
@@ -1476,7 +1489,7 @@ class ZimraDeviceService
         // Write final JSON sent to FDMS (with deviceID and signature)
         file_put_contents(
             "{$debugDir}/receipt_{$timestamp}_{$invoiceNo}_final.json",
-            json_encode($finalPayload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION)
+            json_encode($finalPayload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
         );
         
         // Write debug summary
@@ -1760,35 +1773,44 @@ class ZimraDeviceService
     */
     private function getFdmsTaxConfig(ZimraConfig $zimraConfig): array
     {
-        // First check if we have cached taxes in config
-        if (!empty($zimraConfig->taxes)) {
-            Log::debug('Using cached FDMS tax config', ['taxes' => $zimraConfig->taxes]);
-            return $zimraConfig->taxes;
-        }
-
-        // Otherwise fetch from FDMS
+        // ALWAYS fetch from FDMS first to get registered tax IDs (RCPT014 fix)
         try {
             $configResponse = $this->getConfig($zimraConfig->device_id);
             
+            Log::info('RCPT014 DEBUG: Raw FDMS GetConfig response', [
+                'full_response' => $configResponse,
+                'taxes_field' => $configResponse['taxes'] ?? 'NOT_FOUND',
+            ]);
+            
             if (isset($configResponse['taxes']) && is_array($configResponse['taxes'])) {
-                Log::info('Fetched FDMS tax config', ['taxes' => $configResponse['taxes']]);
+                // Log each tax for debugging
+                foreach ($configResponse['taxes'] as $idx => $tax) {
+                    Log::info("RCPT014 DEBUG: Tax[$idx]", [
+                        'taxID' => $tax['taxID'] ?? 'MISSING',
+                        'taxCode' => $tax['taxCode'] ?? 'MISSING',
+                        'taxPercent' => $tax['taxPercent'] ?? 'MISSING',
+                        'taxName' => $tax['taxName'] ?? 'MISSING',
+                    ]);
+                }
                 return $configResponse['taxes'];
             }
         } catch (\Exception $e) {
-            Log::warning('Failed to fetch FDMS tax config, using defaults', [
-                'error' => $e->getMessage()
+            Log::error('RCPT014 DEBUG: Failed to fetch FDMS tax config', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
         }
 
-        // Default tax configuration if FDMS unavailable
-        return [
-            [
-                'taxID' => 1,
-                'taxCode' => 'A',
-                'taxPercent' => 15.0,
-                'taxName' => 'VAT Standard',
-            ]
-        ];
+        // Check cached taxes as fallback
+        if (!empty($zimraConfig->taxes)) {
+            Log::warning('RCPT014 DEBUG: Using cached taxes (may cause RCPT014)', [
+                'cached_taxes' => $zimraConfig->taxes
+            ]);
+            return $zimraConfig->taxes;
+        }
+
+        // THROW ERROR instead of using defaults - defaults will cause RCPT014
+        throw new \Exception('RCPT014: Cannot get tax configuration from FDMS. Call GetConfig first to register taxes for this device.');
     }
 
     /*
@@ -1800,23 +1822,32 @@ class ZimraDeviceService
     */
     private function buildAndValidateReceiptBCMath(array $receiptData, int $fiscalDayNo, array $fdmsTaxes = []): array
     {
-        // Default to tax-inclusive unless explicitly set
-        $taxInclusive = $receiptData['receiptLinesTaxInclusive'] ?? false;
-        $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
+        // Default to tax-inclusive (true) per ZIMRA standard
+        $taxInclusive = $receiptData['receiptLinesTaxInclusive'] ?? true;
+        $receiptData['receiptLinesTaxInclusive'] = (bool) $taxInclusive;
 
-        // Build tax lookup from FDMS config
+        // Build tax lookup from FDMS config - CRITICAL for RCPT012/RCPT014
         $taxLookup = [];
         foreach ($fdmsTaxes as $tax) {
-            $code = $tax['taxCode'] ?? 'A';
-            $taxLookup[$code] = [
-                'taxID' => $tax['taxID'] ?? 1,
-                'taxPercent' => (string) ($tax['taxPercent'] ?? '15.00'),
-            ];
+            $code = $tax['taxCode'] ?? null;
+            if ($code !== null) {
+                $taxLookup[$code] = [
+                    'taxID' => (int) ($tax['taxID'] ?? 1),
+                    'taxPercent' => (string) ($tax['taxPercent'] ?? '15.00'),
+                    'taxName' => $tax['taxName'] ?? 'VAT',
+                ];
+            }
+        }
+
+        // If no taxes from FDMS, throw error - we MUST have valid tax config
+        if (empty($taxLookup)) {
+            throw new \Exception('RCPT012/RCPT014: No tax configuration from FDMS. Call GetConfig first.');
         }
 
         Log::debug('Receipt Tax Mode (BCMath)', [
             'tax_inclusive' => $taxInclusive,
             'fdms_tax_lookup' => $taxLookup,
+            'available_tax_codes' => array_keys($taxLookup),
             'fiscal_day_no' => $fiscalDayNo,
         ]);
 
@@ -1834,14 +1865,23 @@ class ZimraDeviceService
             $quantity = $this->bcFormat($line['receiptLineQuantity'] ?? '1');
             $taxCode = $line['taxCode'] ?? 'A';
             
-            // Get taxID and taxPercent from FDMS config
-            $fdmsTax = $taxLookup[$taxCode] ?? ['taxID' => 1, 'taxPercent' => '15.00'];
-            $taxID = $line['taxID'] ?? $fdmsTax['taxID'];
-            $taxPercent = $this->bcFormat($line['taxPercent'] ?? $fdmsTax['taxPercent']);
+            // CRITICAL: Validate taxCode exists in FDMS config (RCPT012)
+            if (!isset($taxLookup[$taxCode])) {
+                $availableCodes = implode(', ', array_keys($taxLookup));
+                throw new \Exception("RCPT012: Invalid tax code '{$taxCode}'. Available codes from FDMS: [{$availableCodes}]");
+            }
             
-            // Update line with correct values
-            $line['taxID'] = $taxID;
-            $line['taxPercent'] = (float) $taxPercent;
+            // CRITICAL: Always use taxID from FDMS config (RCPT014) - never from input
+            $fdmsTax = $taxLookup[$taxCode];
+            $taxID = (int) $fdmsTax['taxID'];
+            $taxPercent = $this->bcFormat($fdmsTax['taxPercent']);
+            
+            Log::debug('Line tax assignment', [
+                'line_no' => $index + 1,
+                'taxCode' => $taxCode,
+                'taxID_from_fdms' => $taxID,
+                'taxPercent_from_fdms' => $taxPercent,
+            ]);
 
             // Calculate line total: price * quantity (use scale 6 for internal precision)
             $lineTotal = bcmul($price, $quantity, 6);
@@ -1862,18 +1902,29 @@ class ZimraDeviceService
             $taxAmount = $this->bcRound($taxAmount, 2);
             $salesAmountWithTax = $this->bcRound($salesAmountWithTax, 2);
 
-            // Update line with formatted values (always 2 decimals)
-            $line['receiptLinePrice'] = (float) $price;
-            $line['receiptLineQuantity'] = (float) $quantity;
-            $line['receiptLineTotal'] = (float) $lineTotal;
+            // CRITICAL: Rebuild line with fields in EXACT order per FDMS spec
+            // Field order matters for signature verification
+            // DO NOT CAST TO FLOAT - use bcFormat strings for consistent JSON signing
+            $line = [
+                'receiptLineType' => $line['receiptLineType'] ?? 'Sale',
+                'receiptLineNo' => (int) ($line['receiptLineNo'] ?? $index + 1),
+                'receiptLineHSCode' => $line['receiptLineHSCode'] ?? '00000000',
+                'receiptLineName' => $line['receiptLineName'] ?? 'Item',
+                'receiptLinePrice' => $this->bcFormat($price, 2),
+                'receiptLineQuantity' => $this->bcFormat($quantity, 2),
+                'receiptLineTotal' => $this->bcFormat($lineTotal, 2),
+                'taxCode' => $taxCode,
+                'taxPercent' => $this->bcFormat($taxPercent, 2),
+                'taxID' => (int) $taxID,
+            ];
 
             // Accumulate tax totals by taxCode (use scale 6 for accumulation)
-            $taxKey = "{$taxCode}_{$taxPercent}_{$taxID}";
+            $taxKey = "{$taxCode}_{$taxID}";
             if (!isset($taxTotals[$taxKey])) {
                 $taxTotals[$taxKey] = [
                     'taxCode' => $taxCode,
-                    'taxPercent' => (float) $taxPercent,
-                    'taxID' => $taxID,
+                    'taxPercent' => $this->bcFormat($taxPercent, 2),
+                    'taxID' => (int) $taxID,
                     'taxAmount' => '0.000000',
                     'salesAmountWithTax' => '0.000000',
                 ];
@@ -1902,21 +1953,21 @@ class ZimraDeviceService
         // Round receipt total AFTER all accumulation (was accumulated at scale 6)
         $calculatedReceiptTotal = $this->bcRound($calculatedReceiptTotal, 2);
 
-        // Convert tax totals to float with 2 decimal precision (round after accumulation)
+        // Convert tax totals - DO NOT CAST TO FLOAT for consistent JSON signing
         $formattedTaxes = [];
         foreach ($taxTotals as $tax) {
             $formattedTaxes[] = [
                 'taxCode' => $tax['taxCode'],
-                'taxPercent' => (float) $tax['taxPercent'],
-                'taxID' => $tax['taxID'],
-                'taxAmount' => (float) $this->bcRound($tax['taxAmount'], 2),
-                'salesAmountWithTax' => (float) $this->bcRound($tax['salesAmountWithTax'], 2),
+                'taxPercent' => $tax['taxPercent'],
+                'taxID' => (int) $tax['taxID'],
+                'taxAmount' => $this->bcRound($tax['taxAmount'], 2),
+                'salesAmountWithTax' => $this->bcRound($tax['salesAmountWithTax'], 2),
             ];
         }
         $receiptData['receiptTaxes'] = $formattedTaxes;
 
-        // Set receipt total (rounded to 2 decimals)
-        $receiptData['receiptTotal'] = (float) $calculatedReceiptTotal;
+        // Set receipt total - DO NOT CAST TO FLOAT
+        $receiptData['receiptTotal'] = $this->bcRound($calculatedReceiptTotal, 2);
 
         Log::debug('Receipt Tax Totals (BCMath)', [
             'taxes' => $receiptData['receiptTaxes'],
@@ -1933,7 +1984,8 @@ class ZimraDeviceService
 
         foreach ($payments as &$payment) {
             $paymentAmount = $this->bcFormat($payment['paymentAmount'] ?? '0');
-            $payment['paymentAmount'] = (float) $paymentAmount;
+            // DO NOT CAST TO FLOAT - use bcFormat string
+            $payment['paymentAmount'] = $this->bcFormat($paymentAmount, 2);
             $totalPayments = bcadd($totalPayments, $paymentAmount, 2);
         }
         unset($payment);
@@ -1990,7 +2042,38 @@ class ZimraDeviceService
             'fiscal_day_no' => $fiscalDayNo,
         ]);
 
-        return $receiptData;
+        /*
+        |--------------------------------------------------------------------------
+        | Build Canonical Receipt Structure
+        |--------------------------------------------------------------------------
+        */
+        $canonicalReceipt = [
+            'receiptType' => $receiptData['receiptType'] ?? 'FiscalInvoice',
+            'receiptCurrency' => $receiptData['receiptCurrency'] ?? 'USD',
+            'receiptCounter' => (int) ($receiptData['receiptCounter'] ?? 1),
+            'receiptGlobalNo' => (int) ($receiptData['receiptGlobalNo'] ?? 1),
+            'invoiceNo' => $receiptData['invoiceNo'] ?? '',
+            'receiptDate' => $receiptData['receiptDate'] ?? date('Y-m-d\TH:i:s'),
+            'receiptLinesTaxInclusive' => $taxInclusive,
+            'receiptLines' => $receiptData['receiptLines'],
+            'receiptTaxes' => $receiptData['receiptTaxes'],
+            'receiptPayments' => $receiptData['receiptPayments'],
+            'receiptTotal' => $receiptData['receiptTotal'],
+            'receiptPrintForm' => $receiptData['receiptPrintForm'] ?? 'Receipt48',
+        ];
+
+        // Add optional fields if present
+        if (!empty($receiptData['buyerData'])) {
+            $canonicalReceipt['buyerData'] = $receiptData['buyerData'];
+        }
+        if (!empty($receiptData['receiptNotes'])) {
+            $canonicalReceipt['receiptNotes'] = $receiptData['receiptNotes'];
+        }
+        if (!empty($receiptData['creditDebitNote'])) {
+            $canonicalReceipt['creditDebitNote'] = $receiptData['creditDebitNote'];
+        }
+
+        return $canonicalReceipt;
     }
 
     /**
@@ -2256,6 +2339,72 @@ class ZimraDeviceService
             'length' => strlen($json),
         ]);
 
+        // Step 0: Validate certificate and private key
+        $certPath = storage_path('app/zimra/device_certificate.pem');
+        $privateKeyPath = storage_path('app/zimra/device_private.key');
+        
+        if (!file_exists($certPath)) {
+            throw new \Exception('RCPT025: Device certificate not found. Please register device first.');
+        }
+        if (!file_exists($privateKeyPath)) {
+            throw new \Exception('RCPT025: Device private key not found. Please register device first.');
+        }
+
+        // Load and validate certificate
+        $certPem = file_get_contents($certPath);
+        $cert = openssl_x509_read($certPem);
+        if (!$cert) {
+            throw new \Exception('RCPT025: Failed to read device certificate: ' . openssl_error_string());
+        }
+
+        // Check certificate expiry
+        $certInfo = openssl_x509_parse($cert);
+        if ($certInfo) {
+            $validTo = $certInfo['validTo_time_t'] ?? 0;
+            $validFrom = $certInfo['validFrom_time_t'] ?? 0;
+            $now = time();
+            
+            Log::info('SIGNING_CERTIFICATE_INFO', [
+                'subject' => $certInfo['subject'] ?? [],
+                'issuer' => $certInfo['issuer'] ?? [],
+                'valid_from' => date('Y-m-d H:i:s', $validFrom),
+                'valid_to' => date('Y-m-d H:i:s', $validTo),
+                'is_valid' => ($now >= $validFrom && $now <= $validTo),
+                'days_until_expiry' => round(($validTo - $now) / 86400),
+            ]);
+
+            if ($now < $validFrom) {
+                throw new \Exception('RCPT025: Device certificate not yet valid. Valid from: ' . date('Y-m-d H:i:s', $validFrom));
+            }
+            if ($now > $validTo) {
+                throw new \Exception('RCPT025: Device certificate has EXPIRED. Expired on: ' . date('Y-m-d H:i:s', $validTo));
+            }
+        }
+
+        // Load private key
+        $privateKeyPem = file_get_contents($privateKeyPath);
+        $privateKey = openssl_pkey_get_private($privateKeyPem);
+
+        if (!$privateKey) {
+            throw new \Exception('RCPT025: Failed to load private key: ' . openssl_error_string());
+        }
+
+        // Verify private key matches certificate
+        $publicKeyFromCert = openssl_pkey_get_public($cert);
+        $publicKeyFromPrivate = openssl_pkey_get_details($privateKey);
+        $certKeyDetails = openssl_pkey_get_details($publicKeyFromCert);
+        
+        if ($publicKeyFromPrivate['key'] !== $certKeyDetails['key']) {
+            Log::error('RCPT025: Private key does NOT match certificate public key');
+            throw new \Exception('RCPT025: Private key does not match the registered certificate. Re-register the device.');
+        }
+        
+        Log::info('SIGNING_KEY_VALIDATION', [
+            'private_key_type' => $publicKeyFromPrivate['type'] ?? 'unknown',
+            'private_key_bits' => $publicKeyFromPrivate['bits'] ?? 0,
+            'key_match' => true,
+        ]);
+
         // Step 1: Generate SHA256 hash for the 'hash' field
         $hashBinary = hash('sha256', $json, true);
         $hashBase64 = base64_encode($hashBinary);
@@ -2264,20 +2413,6 @@ class ZimraDeviceService
             'hash_base64' => $hashBase64,
             'hash_hex' => bin2hex($hashBinary),
         ]);
-
-        // Step 2: Load private key
-        $privateKeyPath = storage_path('app/zimra/device_private.key');
-        
-        if (!file_exists($privateKeyPath)) {
-            throw new \Exception('Device private key not found. Please register device first.');
-        }
-
-        $privateKeyPem = file_get_contents($privateKeyPath);
-        $privateKey = openssl_pkey_get_private($privateKeyPem);
-
-        if (!$privateKey) {
-            throw new \Exception('Failed to load private key for signing: ' . openssl_error_string());
-        }
 
         // Step 3: Sign the RAW JSON string (openssl_sign hashes internally with OPENSSL_ALGO_SHA256)
         $signResult = openssl_sign($json, $signatureBinary, $privateKey, OPENSSL_ALGO_SHA256);
@@ -2294,28 +2429,31 @@ class ZimraDeviceService
             'signature_length' => strlen($signatureBinary),
         ]);
 
-        // Step 4: Verify signature locally before sending
-        $certPath = storage_path('app/zimra/device_certificate.pem');
-        if (file_exists($certPath)) {
-            $certPem = file_get_contents($certPath);
-            $cert = openssl_x509_read($certPem);
-            if ($cert) {
-                $publicKey = openssl_pkey_get_public($cert);
-                // Verify against raw JSON (same as what we signed)
-                $verifyResult = openssl_verify($json, $signatureBinary, $publicKey, OPENSSL_ALGO_SHA256);
-                
-                Log::info('SIGNING_LOCAL_VERIFY', [
-                    'verified' => $verifyResult === 1,
-                    'verify_result_code' => $verifyResult,
-                ]);
-                
-                if ($verifyResult !== 1) {
-                    Log::error('SIGNING_LOCAL_VERIFY_FAILED', [
-                        'openssl_error' => openssl_error_string(),
-                    ]);
-                }
-            }
+        // Step 4: Verify signature locally before sending (CRITICAL for RCPT025 debugging)
+        $publicKey = openssl_pkey_get_public($cert);
+        $verifyResult = openssl_verify($json, $signatureBinary, $publicKey, OPENSSL_ALGO_SHA256);
+        
+        Log::info('SIGNING_LOCAL_VERIFY', [
+            'verified' => $verifyResult === 1,
+            'verify_result_code' => $verifyResult,
+            'json_first_100_chars' => substr($json, 0, 100),
+            'json_last_100_chars' => substr($json, -100),
+        ]);
+        
+        if ($verifyResult !== 1) {
+            $opensslError = openssl_error_string();
+            Log::error('RCPT025_LOCAL_VERIFY_FAILED', [
+                'openssl_error' => $opensslError,
+                'verify_result_code' => $verifyResult,
+                'json_length' => strlen($json),
+            ]);
+            throw new \Exception("RCPT025: Local signature verification FAILED. OpenSSL error: {$opensslError}. This indicates a signing problem.");
         }
+        
+        Log::info('RCPT025_LOCAL_VERIFY_PASSED', [
+            'signature_verified' => true,
+            'hash' => $hashBase64,
+        ]);
 
         return [
             'hash' => $hashBase64,

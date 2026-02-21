@@ -30,6 +30,7 @@ Route::post('/zimra/open-day', [ZimraController::class, 'openDay']);
 Route::post('/zimra/close-day', [ZimraController::class, 'closeDay']);
 Route::post('/zimra/force-close-day', [ZimraController::class, 'forceCloseDay']);
 Route::get('/zimra/fiscal-day', [ZimraController::class, 'fiscalDayStatus']);
+Route::post('/zimra/sync-fiscal-day', [ZimraController::class, 'syncFiscalDay']);
 Route::post('/zimra/submit-receipt', [ZimraController::class, 'submitReceipt']);
 Route::post('/zimra/submit-file', [ZimraController::class, 'submitFile']);
 Route::get('/zimra/receipts', [ZimraController::class, 'getReceipts']);

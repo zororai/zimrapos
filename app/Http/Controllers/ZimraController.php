@@ -453,6 +453,97 @@ class ZimraController extends Controller
 
     /*
     |--------------------------------------------------------------------------
+    | Sync Fiscal Day with FDMS Status
+    |--------------------------------------------------------------------------
+    | Calls FDMS getStatus and updates local database to match
+    |--------------------------------------------------------------------------
+    */
+    public function syncFiscalDay(ZimraDeviceService $zimra)
+    {
+        try {
+            $config = \App\Models\ZimraConfig::getActive();
+            if (!$config || !$config->device_id) {
+                return response()->json([
+                    'error' => true,
+                    'message' => 'No device registered'
+                ], 400);
+            }
+
+            // Get FDMS status
+            $fdmsStatus = $zimra->getStatus();
+            
+            if (isset($fdmsStatus['error'])) {
+                return response()->json([
+                    'error' => true,
+                    'message' => 'Failed to get FDMS status',
+                    'fdms_status' => $fdmsStatus
+                ], 400);
+            }
+
+            $fiscalDayStatus = $fdmsStatus['fiscalDayStatus'] ?? null;
+            $lastFiscalDayNo = $fdmsStatus['lastFiscalDayNo'] ?? null;
+            $lastReceiptGlobalNo = $fdmsStatus['lastReceiptGlobalNo'] ?? 0;
+
+            // Get current local fiscal day
+            $localFiscalDay = \App\Models\FiscalDay::getCurrentOpen($config->device_id);
+
+            // Sync logic based on FDMS status
+            if ($fiscalDayStatus === 'FiscalDayOpened') {
+                // FDMS says day is open - ensure we have matching local record
+                if (!$localFiscalDay || $localFiscalDay->fiscal_day_no !== $lastFiscalDayNo) {
+                    // Close any mismatched local open days
+                    \App\Models\FiscalDay::where('device_id', $config->device_id)
+                        ->where('status', 'open')
+                        ->update(['status' => 'closed', 'closed_at' => now()]);
+                    
+                    // Create or update local fiscal day to match FDMS
+                    $localFiscalDay = \App\Models\FiscalDay::updateOrCreate(
+                        [
+                            'device_id' => $config->device_id,
+                            'fiscal_day_no' => $lastFiscalDayNo
+                        ],
+                        [
+                            'status' => 'open',
+                            'opened_at' => now(),
+                            'receipt_counter' => $lastReceiptGlobalNo
+                        ]
+                    );
+                }
+            } else {
+                // FDMS says day is NOT open - close any local open days
+                if ($localFiscalDay) {
+                    $localFiscalDay->update([
+                        'status' => 'closed',
+                        'closed_at' => now()
+                    ]);
+                    $localFiscalDay = null;
+                }
+            }
+
+            // Return synced status
+            return response()->json([
+                'fdms_status' => $fdmsStatus,
+                'fiscal_day' => $localFiscalDay ? [
+                    'is_open' => true,
+                    'fiscal_day' => $localFiscalDay
+                ] : [
+                    'is_open' => false,
+                    'message' => 'No open fiscal day'
+                ],
+                'synced' => true
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Sync fiscal day error', ['error' => $e->getMessage()]);
+            return response()->json([
+                'error' => true,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Submit Receipt (mTLS + Signing)
     |--------------------------------------------------------------------------
     */
