@@ -1,0 +1,72 @@
+{
+  "deviceID": 123456,
+  "receipt": {
+    "receiptType": "FiscalInvoice",
+    "receiptCurrency": "USD",
+    "receiptCounter": 1,
+    "receiptGlobalNo": 1,
+    "invoiceNo": "INV-2024-0001",
+    "buyerData": {
+      "buyerRegisterName": "John Doe",
+      "buyerTradeName": "Doe Enterprises",
+      "buyerTIN": "1234567890",
+      "buyerContacts": {
+        "phoneNo": "+263771234567",
+        "email": "john@example.com"
+      },
+      "buyerAddress": {
+        "street": "123 Main Street",
+        "city": "Harare",
+        "country": "Zimbabwe"
+      }
+    },
+    "receiptNotes": "Thank you for your business - Sandbox test with 0% tax",
+    "receiptDate": "2024-02-21T23:11:00",
+    "receiptLinesTaxInclusive": true,
+    "receiptLines": [
+      {
+        "receiptLineNo": 1,
+        "receiptLineType": "Sale",
+        "receiptLineName": "Product A",
+        "receiptLineQuantity": 2.0,
+        "receiptLinePrice": 15.0,
+        "receiptLineTotal": 30.0,
+        "taxPercent": 0.0,
+        "taxID": 513,
+        "receiptLineHSCode": "00000000"
+      },
+      {
+        "receiptLineNo": 2,
+        "receiptLineType": "Sale",
+        "receiptLineName": "Product B",
+        "receiptLineQuantity": 1.0,
+        "receiptLinePrice": 50.0,
+        "receiptLineTotal": 50.0,
+        "taxPercent": 0.0,
+        "taxID": 513,
+        "receiptLineHSCode": "00000000"
+      }
+    ],
+    "receiptTaxes": [
+      {
+        "taxPercent": 0.0,
+        "taxID": 513,
+        "taxAmount": 0.0,
+        "salesAmountWithTax": 80.0
+      }
+    ],
+    "receiptPayments": [
+      {
+        "moneyTypeCode": "Cash",
+        "paymentAmount": 80.0
+      }
+    ],
+    "receiptTotal": 80.0,
+    "receiptPrintForm": "A4",
+    "fiscalDayNo": 1,
+    "receiptDeviceSignature": {
+      "hash": "base64_encoded_hash_here",
+      "signature": "base64_encoded_signature_here"
+    }
+  }
+}

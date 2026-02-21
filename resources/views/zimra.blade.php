@@ -654,7 +654,20 @@
                                     </button>
                                 </div>
 
-                                <!-- Payment -->
+                                <!-- VAT Status Banner -->
+                                <div x-show="taxConfig.message" class="p-4 rounded-lg border" :class="taxConfig.isVatRegistered ? 'bg-green-50 border-green-200 text-green-800' : 'bg-yellow-50 border-yellow-200 text-yellow-800'">
+                                    <div class="flex items-start space-x-2">
+                                        <svg class="w-5 h-5 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+                                        </svg>
+                                        <div>
+                                            <p class="font-medium" x-text="taxConfig.message"></p>
+                                            <p class="text-sm mt-1" x-show="!taxConfig.isVatRegistered">Only 0% tax is available for this device.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Payment & Tax -->
                                 <div class="grid grid-cols-2 gap-4">
                                     <div>
                                         <label class="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
@@ -665,15 +678,17 @@
                                         </select>
                                     </div>
                                     <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">VAT Tax Code</label>
-                                        <select x-model="receiptForm.taxCode" @change="updateTaxPercent()" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
-                                            <option value="A">A - Standard Rated (15%)</option>
-                                            <option value="B">B - Zero Rated (0%)</option>
-                                            <option value="C">C - Exempt (0%)</option>
-                                            <option value="D">D - Withholding VAT (15%)</option>
-                                            <option value="E">E - Deemed Supplies</option>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">
+                                            Tax Rate
+                                            <span x-show="!taxConfig.isVatRegistered" class="text-xs text-yellow-600">(Auto-set to 0%)</span>
+                                        </label>
+                                        <select x-model.number="receiptForm.taxPercent" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" :disabled="!taxConfig.isVatRegistered">
+                                            <template x-for="tax in taxConfig.applicableTaxes" :key="tax.taxID">
+                                                <option :value="tax.taxPercent" x-text="`${tax.taxName} (${tax.taxPercent}%)`"></option>
+                                            </template>
                                         </select>
-                                        <p class="text-xs text-gray-500 mt-1" x-text="getTaxCodeDescription()"></p>
+                                        <p class="text-xs text-gray-500 mt-1" x-show="taxConfig.isVatRegistered">Select tax rate from FDMS configuration</p>
+                                        <p class="text-xs text-yellow-600 mt-1" x-show="!taxConfig.isVatRegistered">Tax field is disabled - device not VAT registered</p>
                                     </div>
                                 </div>
 
@@ -710,7 +725,7 @@
                                 </div>
                             </template>
 
-                            <!-- Receipts History -->
+                            <!-- Receipts History (Always visible) -->
                             <div class="mt-6">
                                 <div class="flex items-center justify-between mb-4">
                                     <h3 class="text-lg font-semibold text-gray-900">Receipt History</h3>
@@ -920,12 +935,21 @@
                 deviceStatus: null,
                 receipts: [],
                 
+                // Tax configuration from FDMS
+                taxConfig: {
+                    isVatRegistered: false,
+                    vatNumber: null,
+                    applicableTaxes: [],
+                    message: ''
+                },
+                
                 async init() {
                     await this.loadAllConfigs();
                     await this.loadConfig();
                     await this.loadFiscalDay();
                     await this.loadNextInvoiceNo();
                     await this.loadReceipts();
+                    await this.loadTaxConfig();
                 },
 
                 async loadAllConfigs() {
@@ -997,7 +1021,7 @@
                         const res = await fetch('/zimra/next-invoice-no');
                         if (res.ok) {
                             const data = await res.json();
-                            this.receiptForm.invoiceNo = data.invoice_no || 'INV-001';
+                            this.receiptForm.invoiceNo = data.invoice_no;
                         }
                     } catch (e) {
                         console.error('Failed to load next invoice number:', e);
@@ -1005,6 +1029,27 @@
                     }
                 },
                 
+                async loadTaxConfig() {
+                    try {
+                        const res = await fetch('/zimra/tax-config');
+                        if (res.ok) {
+                            const data = await res.json();
+                            this.taxConfig = data;
+                            
+                            // Auto-set tax to first available tax (usually 0% for non-VAT)
+                            if (data.applicableTaxes && data.applicableTaxes.length > 0) {
+                                const firstTax = data.applicableTaxes[0];
+                                this.receiptForm.taxPercent = firstTax.taxPercent;
+                                // Don't set taxCode - backend will handle it conditionally
+                            }
+                            
+                            console.log('Tax config loaded:', data);
+                        }
+                    } catch (e) {
+                        console.error('Failed to load tax config:', e);
+                    }
+                },
+
                 async loadConfig() {
                     try {
                         const res = await fetch('/zimra/config');
@@ -1410,20 +1455,21 @@
                             invoiceNo: this.receiptForm.invoiceNo,
                             receiptDate: new Date().toISOString().slice(0, 19),
                             receiptLinesTaxInclusive: true,
-                            receiptLines: this.receiptForm.receiptLines.map((line, i) => ({
-                                receiptLineType: 'Sale',
-                                receiptLineNo: i + 1,
-                                receiptLineHSCode: line.receiptLineHSCode || '00000000',
-                                receiptLineName: line.receiptLineName,
-                                receiptLinePrice: line.receiptLinePrice,
-                                receiptLineQuantity: line.receiptLineQuantity,
-                                receiptLineTotal: line.receiptLineQuantity * line.receiptLinePrice,
-                                taxCode: this.receiptForm.taxCode,
-                                taxPercent: this.receiptForm.taxPercent,
-                                taxID: this.getTaxID()
-                            })),
+                            receiptLines: this.receiptForm.receiptLines.map((line, i) => {
+                                console.log('Line HS Code:', line.receiptLineHSCode); // Debug
+                                return {
+                                    receiptLineType: 'Sale',
+                                    receiptLineNo: i + 1,
+                                    receiptLineHSCode: line.receiptLineHSCode || '00000000',
+                                    receiptLineName: line.receiptLineName,
+                                    receiptLinePrice: line.receiptLinePrice,
+                                    receiptLineQuantity: line.receiptLineQuantity,
+                                    receiptLineTotal: line.receiptLineQuantity * line.receiptLinePrice,
+                                    taxPercent: this.receiptForm.taxPercent,
+                                    taxID: this.getTaxID()
+                                };
+                            }),
                             receiptTaxes: [{
-                                taxCode: this.receiptForm.taxCode,
                                 taxPercent: this.receiptForm.taxPercent,
                                 taxID: this.getTaxID(),
                                 taxAmount: taxAmount,
@@ -1609,6 +1655,33 @@
                         this.showMessage('An error occurred: ' + e.message, 'error');
                     }
                     this.loading = false;
+                },
+
+                getTaxID() {
+                    // Find tax by taxPercent from FDMS config
+                    const tax = this.taxConfig.applicableTaxes.find(t => t.taxPercent === this.receiptForm.taxPercent);
+                    return tax ? tax.taxID : 513; // Default to 513 (0% tax)
+                },
+
+                calculateTotal() {
+                    return this.receiptForm.receiptLines.reduce((sum, line) => {
+                        return sum + (line.receiptLineQuantity * line.receiptLinePrice);
+                    }, 0);
+                },
+
+                addReceiptLine() {
+                    this.receiptForm.receiptLines.push({
+                        receiptLineName: '',
+                        receiptLineQuantity: 1,
+                        receiptLinePrice: 0,
+                        receiptLineHSCode: ''
+                    });
+                },
+
+                removeReceiptLine(index) {
+                    if (this.receiptForm.receiptLines.length > 1) {
+                        this.receiptForm.receiptLines.splice(index, 1);
+                    }
                 }
             };
         }

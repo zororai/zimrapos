@@ -481,15 +481,22 @@ class ZimraDeviceService
 
         // Store important config data from ZIMRA response
         if ($response && !isset($response['error'])) {
+            // CRITICAL: Field is 'applicableTaxes' NOT 'taxes' per FDMS spec
             $zimraConfig->update([
                 'qr_url' => $response['qrUrl'] ?? null,
-                'taxes' => $response['taxes'] ?? null,
+                'taxes' => $response['applicableTaxes'] ?? null,
                 'device_operating_mode' => $response['deviceOperatingMode'] ?? null,
                 'certificate_valid_till' => isset($response['certificateValidTill']) 
                     ? \Carbon\Carbon::parse($response['certificateValidTill']) 
                     : null,
             ]);
-            Log::info('ZIMRA Config updated from GetConfig', ['qr_url' => $response['qrUrl'] ?? null]);
+            
+            Log::info('ZIMRA GetConfig Response', [
+                'qr_url' => $response['qrUrl'] ?? null,
+                'vatNumber' => $response['vatNumber'] ?? 'NOT_REGISTERED',
+                'deviceOperatingMode' => $response['deviceOperatingMode'] ?? null,
+                'applicableTaxes' => $response['applicableTaxes'] ?? 'NOT_FOUND',
+            ]);
         }
 
         return $response;
@@ -1356,15 +1363,37 @@ class ZimraDeviceService
         | 2️⃣ Get Tax Configuration from FDMS (GetConfig)
         |--------------------------------------------------------------------------
         */
+        $configResponse = $this->getConfig($deviceId);
         $fdmsTaxes = $this->getFdmsTaxConfig($zimraConfig);
+        $vatNumber = $configResponse['vatNumber'] ?? null;
         
         Log::info('ZIMRA SubmitReceipt - Tax Config from FDMS', [
             'taxes' => $fdmsTaxes,
+            'vatNumber' => $vatNumber ?? 'NOT_REGISTERED',
         ]);
 
         /*
         |--------------------------------------------------------------------------
-        | 3️⃣ Validate Invoice Number Uniqueness
+        | 3️⃣ Validate VAT Registration (Fix RCPT021)
+        |--------------------------------------------------------------------------
+        */
+        // If device not VAT registered, only allow 0% tax
+        if (!$vatNumber || $vatNumber === 'NOT_REGISTERED') {
+            foreach ($receiptData['receiptLines'] ?? [] as $line) {
+                $lineTaxPercent = (float) ($line['taxPercent'] ?? 0);
+                if ($lineTaxPercent > 0) {
+                    throw new \Exception(
+                        "RCPT021: Device not VAT registered (vatNumber={$vatNumber}). " .
+                        "Only 0% tax allowed. Line has {$lineTaxPercent}% tax."
+                    );
+                }
+            }
+            Log::info('VAT Validation: Device not registered, verified all lines are 0% tax');
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | 4️⃣ Validate Invoice Number Uniqueness
         |--------------------------------------------------------------------------
         */
         $invoiceNo = $receiptData['invoiceNo'] ?? null;
@@ -1443,8 +1472,8 @@ class ZimraDeviceService
         |--------------------------------------------------------------------------
         */
         // Step 1: Encode receipt WITHOUT signature - this is EXACTLY what gets signed
-        // DO NOT use JSON_PRESERVE_ZERO_FRACTION - values are already formatted strings
-        $receiptJson = json_encode($canonicalReceipt, JSON_UNESCAPED_SLASHES);
+        // JSON_PRESERVE_ZERO_FRACTION ensures 25.0 stays as 25.0 not 25
+        $receiptJson = json_encode($canonicalReceipt, JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
         
         Log::info('JSON_BEFORE_SIGNING', [
             'json' => $receiptJson,
@@ -1464,7 +1493,7 @@ class ZimraDeviceService
             'receipt' => $canonicalReceipt,
         ];
         
-        $finalJson = json_encode($finalPayload, JSON_UNESCAPED_SLASHES);
+        $finalJson = json_encode($finalPayload, JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
         
         Log::info('FINAL_JSON_SENT', [
             'json' => $finalJson,
@@ -1489,7 +1518,7 @@ class ZimraDeviceService
         // Write final JSON sent to FDMS (with deviceID and signature)
         file_put_contents(
             "{$debugDir}/receipt_{$timestamp}_{$invoiceNo}_final.json",
-            json_encode($finalPayload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+            json_encode($finalPayload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION)
         );
         
         // Write debug summary
@@ -1777,22 +1806,38 @@ class ZimraDeviceService
         try {
             $configResponse = $this->getConfig($zimraConfig->device_id);
             
+            // CRITICAL: Field is 'applicableTaxes' NOT 'taxes' per FDMS spec
             Log::info('RCPT014 DEBUG: Raw FDMS GetConfig response', [
-                'full_response' => $configResponse,
-                'taxes_field' => $configResponse['taxes'] ?? 'NOT_FOUND',
+                'applicableTaxes' => $configResponse['applicableTaxes'] ?? 'NOT_FOUND',
+                'vatNumber' => $configResponse['vatNumber'] ?? 'NOT_REGISTERED',
             ]);
             
-            if (isset($configResponse['taxes']) && is_array($configResponse['taxes'])) {
-                // Log each tax for debugging
-                foreach ($configResponse['taxes'] as $idx => $tax) {
+            if (isset($configResponse['applicableTaxes']) && is_array($configResponse['applicableTaxes'])) {
+                // Normalize tax data: FDMS sandbox uses 'validFrom' not 'taxValidFrom'
+                $normalizedTaxes = [];
+                foreach ($configResponse['applicableTaxes'] as $idx => $tax) {
+                    // Normalize field names for sandbox compatibility
+                    $normalizedTax = [
+                        'taxID' => $tax['taxID'] ?? null,
+                        'taxPercent' => $tax['taxPercent'] ?? 0.0,
+                        'taxName' => $tax['taxName'] ?? 'Unknown',
+                        'taxCode' => $tax['taxCode'] ?? null, // Optional - sandbox doesn't provide
+                        'taxValidFrom' => $tax['taxValidFrom'] ?? $tax['validFrom'] ?? null,
+                        'taxValidTill' => $tax['taxValidTill'] ?? $tax['validTill'] ?? null,
+                    ];
+                    
                     Log::info("RCPT014 DEBUG: Tax[$idx]", [
-                        'taxID' => $tax['taxID'] ?? 'MISSING',
-                        'taxCode' => $tax['taxCode'] ?? 'MISSING',
-                        'taxPercent' => $tax['taxPercent'] ?? 'MISSING',
-                        'taxName' => $tax['taxName'] ?? 'MISSING',
+                        'taxID' => $normalizedTax['taxID'],
+                        'taxCode' => $normalizedTax['taxCode'] ?? 'NOT_PROVIDED',
+                        'taxPercent' => $normalizedTax['taxPercent'],
+                        'taxName' => $normalizedTax['taxName'],
+                        'taxValidFrom' => $normalizedTax['taxValidFrom'] ?? 'NOT_PROVIDED',
+                        'taxValidTill' => $normalizedTax['taxValidTill'] ?? 'NOT_PROVIDED',
                     ]);
+                    
+                    $normalizedTaxes[] = $normalizedTax;
                 }
-                return $configResponse['taxes'];
+                return $normalizedTaxes;
             }
         } catch (\Exception $e) {
             Log::error('RCPT014 DEBUG: Failed to fetch FDMS tax config', [
@@ -1827,27 +1872,51 @@ class ZimraDeviceService
         $receiptData['receiptLinesTaxInclusive'] = (bool) $taxInclusive;
 
         // Build tax lookup from FDMS config - CRITICAL for RCPT012/RCPT014
-        $taxLookup = [];
+        // Map by taxPercent (sandbox doesn't provide taxCode)
+        // NORMALIZE taxPercent to 2 decimals for safe comparison
+        $taxLookupByPercent = [];
+        $taxLookupByCode = [];
+        
         foreach ($fdmsTaxes as $tax) {
-            $code = $tax['taxCode'] ?? null;
-            if ($code !== null) {
-                $taxLookup[$code] = [
-                    'taxID' => (int) ($tax['taxID'] ?? 1),
-                    'taxPercent' => (string) ($tax['taxPercent'] ?? '15.00'),
-                    'taxName' => $tax['taxName'] ?? 'VAT',
-                ];
+            $taxID = (int) ($tax['taxID'] ?? null);
+            $taxPercentRaw = (float) ($tax['taxPercent'] ?? 0.0);
+            $taxPercentNormalized = number_format($taxPercentRaw, 2, '.', '');
+            $taxName = $tax['taxName'] ?? 'Unknown';
+            $taxCode = $tax['taxCode'] ?? null;
+            
+            if ($taxID === null) {
+                continue; // Skip invalid tax entries
+            }
+            
+            $taxInfo = [
+                'taxID' => $taxID,
+                'taxPercent' => $taxPercentNormalized,
+                'taxName' => $taxName,
+                'taxCode' => $taxCode,
+                'taxValidFrom' => $tax['taxValidFrom'] ?? null,
+                'taxValidTill' => $tax['taxValidTill'] ?? null,
+            ];
+            
+            // Map by normalized taxPercent (primary - always available)
+            $taxLookupByPercent[$taxPercentNormalized] = $taxInfo;
+            
+            // Map by taxCode (secondary - only if provided)
+            if ($taxCode !== null) {
+                $taxLookupByCode[$taxCode] = $taxInfo;
             }
         }
 
         // If no taxes from FDMS, throw error - we MUST have valid tax config
-        if (empty($taxLookup)) {
+        if (empty($taxLookupByPercent)) {
             throw new \Exception('RCPT012/RCPT014: No tax configuration from FDMS. Call GetConfig first.');
         }
 
         Log::debug('Receipt Tax Mode (BCMath)', [
             'tax_inclusive' => $taxInclusive,
-            'fdms_tax_lookup' => $taxLookup,
-            'available_tax_codes' => array_keys($taxLookup),
+            'fdms_tax_lookup_by_percent' => $taxLookupByPercent,
+            'fdms_tax_lookup_by_code' => $taxLookupByCode,
+            'available_tax_percents' => array_keys($taxLookupByPercent),
+            'available_tax_codes' => array_keys($taxLookupByCode),
             'fiscal_day_no' => $fiscalDayNo,
         ]);
 
@@ -1863,77 +1932,110 @@ class ZimraDeviceService
         foreach ($receiptLines as $index => &$line) {
             $price = $this->bcFormat($line['receiptLinePrice'] ?? '0');
             $quantity = $this->bcFormat($line['receiptLineQuantity'] ?? '1');
-            $taxCode = $line['taxCode'] ?? 'A';
             
-            // CRITICAL: Validate taxCode exists in FDMS config (RCPT012)
-            if (!isset($taxLookup[$taxCode])) {
-                $availableCodes = implode(', ', array_keys($taxLookup));
-                throw new \Exception("RCPT012: Invalid tax code '{$taxCode}'. Available codes from FDMS: [{$availableCodes}]");
+            // Get tax info from line (could be taxCode or taxPercent)
+            $lineTaxCode = $line['taxCode'] ?? null;
+            $lineTaxPercent = isset($line['taxPercent']) ? number_format((float)$line['taxPercent'], 2, '.', '') : null;
+            
+            // CRITICAL: Map to FDMS tax by taxPercent (sandbox doesn't provide taxCode)
+            // Try taxCode first (if provided and available), then fall back to taxPercent
+            $fdmsTax = null;
+            
+            if ($lineTaxCode && isset($taxLookupByCode[$lineTaxCode])) {
+                // Use taxCode if available (production)
+                $fdmsTax = $taxLookupByCode[$lineTaxCode];
+            } elseif ($lineTaxPercent && isset($taxLookupByPercent[$lineTaxPercent])) {
+                // Use taxPercent (sandbox)
+                $fdmsTax = $taxLookupByPercent[$lineTaxPercent];
+            } else {
+                // Neither worked - throw error
+                $availablePercents = implode(', ', array_keys($taxLookupByPercent));
+                $availableCodes = implode(', ', array_keys($taxLookupByCode));
+                throw new \Exception(
+                    "RCPT012: Invalid tax. Line has taxPercent={$lineTaxPercent}, taxCode={$lineTaxCode}. " .
+                    "Available from FDMS: percents=[{$availablePercents}], codes=[{$availableCodes}]"
+                );
             }
             
             // CRITICAL: Always use taxID from FDMS config (RCPT014) - never from input
-            $fdmsTax = $taxLookup[$taxCode];
             $taxID = (int) $fdmsTax['taxID'];
             $taxPercent = $this->bcFormat($fdmsTax['taxPercent']);
+            $taxCode = $fdmsTax['taxCode'] ?? null;
             
-            Log::debug('Line tax assignment', [
+            // Get receiptDate for tax validity check
+            $receiptDate = $receiptData['receiptDate'] ?? date('Y-m-d\TH:i:s');
+            
+            // RCPT014 DEBUG: Log tax validity period check
+            Log::info('RCPT014 TAX VALIDATION CHECK', [
                 'line_no' => $index + 1,
+                'receiptDate' => $receiptDate,
                 'taxCode' => $taxCode,
-                'taxID_from_fdms' => $taxID,
-                'taxPercent_from_fdms' => $taxPercent,
+                'taxID' => $taxID,
+                'taxPercent' => $taxPercent,
+                'taxValidFrom' => $fdmsTax['taxValidFrom'] ?? 'NOT_SET',
+                'taxValidTill' => $fdmsTax['taxValidTill'] ?? 'NOT_SET',
             ]);
 
-            // Calculate line total: price * quantity (use scale 6 for internal precision)
-            $lineTotal = bcmul($price, $quantity, 6);
+            // FDMS RULE: Round gross FIRST (price * quantity)
+            $lineNet = $this->bcRound(bcmul($price, $quantity, 6), 2);
 
+            // ZIMRA RULE: receiptLinesTaxInclusive determines tax calculation
             if ($taxInclusive) {
-                // Tax inclusive: taxAmount = lineTotal * taxPercent / (100 + taxPercent)
-                $divisor = bcadd('100', $taxPercent, 6);
-                $taxAmount = bcdiv(bcmul($lineTotal, $taxPercent, 6), $divisor, 6);
-                $salesAmountWithTax = $lineTotal;
+                // TRUE = Tax-exclusive pricing (NET prices, tax added on top)
+                // taxAmount = ROUND(lineNet * taxPercent / 100, 2)
+                // salesAmountWithTax = ROUND(lineNet + taxAmount, 2)
+                $taxAmount = $this->bcRound(bcdiv(bcmul($lineNet, $taxPercent, 6), '100', 6), 2);
+                $salesAmountWithTax = $this->bcRound(bcadd($lineNet, $taxAmount, 6), 2);
             } else {
-                // Tax exclusive: taxAmount = lineTotal * taxPercent / 100
-                $taxAmount = bcdiv(bcmul($lineTotal, $taxPercent, 6), '100', 6);
-                $salesAmountWithTax = bcadd($lineTotal, $taxAmount, 6);
+                // FALSE = Tax-inclusive pricing (GROSS prices, tax extracted)
+                // salesAmountWithTax = lineNet (already rounded)
+                // taxAmount = ROUND(lineNet * taxPercent / (100 + taxPercent), 2)
+                $salesAmountWithTax = $lineNet;
+                $divisor = bcadd('100', $taxPercent, 6);
+                $taxAmount = $this->bcRound(bcdiv(bcmul($lineNet, $taxPercent, 6), $divisor, 6), 2);
             }
-
-            // Round final values to 2 decimals AFTER all calculations
-            $lineTotal = $this->bcRound($lineTotal, 2);
-            $taxAmount = $this->bcRound($taxAmount, 2);
-            $salesAmountWithTax = $this->bcRound($salesAmountWithTax, 2);
 
             // CRITICAL: Rebuild line with fields in EXACT order per FDMS spec
             // Field order matters for signature verification
-            // DO NOT CAST TO FLOAT - use bcFormat strings for consistent JSON signing
+            // CAST TO FLOAT after bcRound - FDMS expects JSON numbers, not strings
             $line = [
                 'receiptLineType' => $line['receiptLineType'] ?? 'Sale',
                 'receiptLineNo' => (int) ($line['receiptLineNo'] ?? $index + 1),
                 'receiptLineHSCode' => $line['receiptLineHSCode'] ?? '00000000',
                 'receiptLineName' => $line['receiptLineName'] ?? 'Item',
-                'receiptLinePrice' => $this->bcFormat($price, 2),
-                'receiptLineQuantity' => $this->bcFormat($quantity, 2),
-                'receiptLineTotal' => $this->bcFormat($lineTotal, 2),
-                'taxCode' => $taxCode,
-                'taxPercent' => $this->bcFormat($taxPercent, 2),
-                'taxID' => (int) $taxID,
+                'receiptLinePrice' => (float) $this->bcRound($price, 2),
+                'receiptLineQuantity' => (float) $this->bcRound($quantity, 2),
+                'receiptLineTotal' => (float) $lineNet,
             ];
+            
+            // Only include taxCode if FDMS provided one (sandbox doesn't)
+            if ($taxCode !== null && $taxCode !== '') {
+                $line['taxCode'] = $taxCode;
+            }
+            
+            $line['taxPercent'] = (float) $taxPercent;
+            $line['taxID'] = (int) $taxID;
 
-            // Accumulate tax totals by taxCode (use scale 6 for accumulation)
-            $taxKey = "{$taxCode}_{$taxID}";
+            // Accumulate tax totals by taxID (use scale 2 - accumulate ROUNDED values)
+            $taxKey = (string) $taxID;
             if (!isset($taxTotals[$taxKey])) {
                 $taxTotals[$taxKey] = [
-                    'taxCode' => $taxCode,
-                    'taxPercent' => $this->bcFormat($taxPercent, 2),
+                    'taxPercent' => (float) $taxPercent,
                     'taxID' => (int) $taxID,
-                    'taxAmount' => '0.000000',
-                    'salesAmountWithTax' => '0.000000',
+                    'taxAmount' => '0.00',
+                    'salesAmountWithTax' => '0.00',
                 ];
+                
+                // Only include taxCode if FDMS provided one
+                if ($taxCode !== null && $taxCode !== '') {
+                    $taxTotals[$taxKey]['taxCode'] = $taxCode;
+                }
             }
-            $taxTotals[$taxKey]['taxAmount'] = bcadd($taxTotals[$taxKey]['taxAmount'], $taxAmount, 6);
-            $taxTotals[$taxKey]['salesAmountWithTax'] = bcadd($taxTotals[$taxKey]['salesAmountWithTax'], $salesAmountWithTax, 6);
+            $taxTotals[$taxKey]['taxAmount'] = bcadd($taxTotals[$taxKey]['taxAmount'], $taxAmount, 2);
+            $taxTotals[$taxKey]['salesAmountWithTax'] = bcadd($taxTotals[$taxKey]['salesAmountWithTax'], $salesAmountWithTax, 2);
 
-            // Accumulate receipt total (use scale 6 for internal precision)
-            $calculatedReceiptTotal = bcadd($calculatedReceiptTotal, $salesAmountWithTax, 6);
+            // Accumulate receipt total (use scale 2 - accumulate ROUNDED values)
+            $calculatedReceiptTotal = bcadd($calculatedReceiptTotal, $salesAmountWithTax, 2);
 
             Log::debug('Receipt Line Calculation (BCMath)', [
                 'line_no' => $line['receiptLineNo'] ?? $index + 1,
@@ -1941,7 +2043,7 @@ class ZimraDeviceService
                 'quantity' => $quantity,
                 'tax_percent' => $taxPercent,
                 'tax_inclusive' => $taxInclusive,
-                'line_total' => $lineTotal,
+                'line_net' => $lineNet,
                 'tax_amount' => $taxAmount,
                 'sales_amount_with_tax' => $salesAmountWithTax,
             ]);
@@ -1950,24 +2052,30 @@ class ZimraDeviceService
 
         $receiptData['receiptLines'] = $receiptLines;
 
-        // Round receipt total AFTER all accumulation (was accumulated at scale 6)
-        $calculatedReceiptTotal = $this->bcRound($calculatedReceiptTotal, 2);
-
-        // Convert tax totals - DO NOT CAST TO FLOAT for consistent JSON signing
+        // Receipt total already accumulated at scale 2 - no additional rounding needed
+        // $calculatedReceiptTotal is already correct
+        
+        // Convert tax totals - CAST TO FLOAT (already accumulated at scale 2)
         $formattedTaxes = [];
         foreach ($taxTotals as $tax) {
-            $formattedTaxes[] = [
-                'taxCode' => $tax['taxCode'],
-                'taxPercent' => $tax['taxPercent'],
+            $taxEntry = [
+                'taxPercent' => (float) $tax['taxPercent'],
                 'taxID' => (int) $tax['taxID'],
-                'taxAmount' => $this->bcRound($tax['taxAmount'], 2),
-                'salesAmountWithTax' => $this->bcRound($tax['salesAmountWithTax'], 2),
+                'taxAmount' => (float) $tax['taxAmount'],
+                'salesAmountWithTax' => (float) $tax['salesAmountWithTax'],
             ];
+            
+            // Only include taxCode if FDMS provided one
+            if (isset($tax['taxCode']) && $tax['taxCode'] !== null && $tax['taxCode'] !== '') {
+                $taxEntry['taxCode'] = $tax['taxCode'];
+            }
+            
+            $formattedTaxes[] = $taxEntry;
         }
         $receiptData['receiptTaxes'] = $formattedTaxes;
 
-        // Set receipt total - DO NOT CAST TO FLOAT
-        $receiptData['receiptTotal'] = $this->bcRound($calculatedReceiptTotal, 2);
+        // Set receipt total - CAST TO FLOAT (FDMS expects JSON numbers)
+        $receiptData['receiptTotal'] = (float) $calculatedReceiptTotal;
 
         Log::debug('Receipt Tax Totals (BCMath)', [
             'taxes' => $receiptData['receiptTaxes'],
@@ -1984,8 +2092,8 @@ class ZimraDeviceService
 
         foreach ($payments as &$payment) {
             $paymentAmount = $this->bcFormat($payment['paymentAmount'] ?? '0');
-            // DO NOT CAST TO FLOAT - use bcFormat string
-            $payment['paymentAmount'] = $this->bcFormat($paymentAmount, 2);
+            // CAST TO FLOAT (FDMS expects JSON numbers)
+            $payment['paymentAmount'] = (float) $this->bcRound($paymentAmount, 2);
             $totalPayments = bcadd($totalPayments, $paymentAmount, 2);
         }
         unset($payment);
@@ -2023,7 +2131,7 @@ class ZimraDeviceService
             'sum_sales_with_tax' => $totalSalesWithTax,
         ]);
 
-        // Validate: receiptTotal == sum(salesAmountWithTax)
+        // STRICT VALIDATION: receiptTotal == sum(salesAmountWithTax)
         if (bccomp($totalSalesWithTax, $calculatedReceiptTotal, 2) !== 0) {
             Log::error('Receipt Tax Sum Mismatch (BCMath)', [
                 'receipt_total' => $calculatedReceiptTotal,

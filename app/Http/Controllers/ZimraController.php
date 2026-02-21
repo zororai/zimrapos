@@ -727,4 +727,67 @@ class ZimraController extends Controller
             ], 400);
         }
     }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Get Tax Configuration (VAT Status + Applicable Taxes)
+    |--------------------------------------------------------------------------
+    */
+    public function getTaxConfig(ZimraDeviceService $zimra)
+    {
+        try {
+            $config = ZimraConfig::getActive();
+            
+            if (!$config || !$config->device_id) {
+                return response()->json([
+                    'error' => true,
+                    'message' => 'No active device configuration found. Please register a device first.',
+                    'isVatRegistered' => false,
+                    'applicableTaxes' => [],
+                ]);
+            }
+
+            // Fetch fresh config from FDMS
+            $fdmsConfig = $zimra->getConfig($config->device_id);
+            
+            $vatNumber = $fdmsConfig['vatNumber'] ?? null;
+            $isVatRegistered = $vatNumber && $vatNumber !== 'NOT_REGISTERED';
+            $applicableTaxes = $fdmsConfig['applicableTaxes'] ?? [];
+            
+            // Format taxes for frontend
+            $formattedTaxes = [];
+            foreach ($applicableTaxes as $tax) {
+                $formattedTaxes[] = [
+                    'taxID' => $tax['taxID'] ?? null,
+                    'taxPercent' => $tax['taxPercent'] ?? 0.0,
+                    'taxName' => $tax['taxName'] ?? 'Unknown',
+                    'taxCode' => $tax['taxCode'] ?? null,
+                    'validFrom' => $tax['validFrom'] ?? $tax['taxValidFrom'] ?? null,
+                    'validTill' => $tax['validTill'] ?? $tax['taxValidTill'] ?? null,
+                ];
+            }
+
+            return response()->json([
+                'isVatRegistered' => $isVatRegistered,
+                'vatNumber' => $vatNumber,
+                'applicableTaxes' => $formattedTaxes,
+                'deviceOperatingMode' => $fdmsConfig['deviceOperatingMode'] ?? 'Unknown',
+                'message' => $isVatRegistered 
+                    ? 'Device is VAT registered. All tax rates available.' 
+                    : 'Device is NOT VAT registered. Only 0% tax allowed.',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('getTaxConfig failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'error' => true,
+                'message' => 'Failed to fetch tax configuration: ' . $e->getMessage(),
+                'isVatRegistered' => false,
+                'applicableTaxes' => [],
+            ], 500);
+        }
+    }
 }
