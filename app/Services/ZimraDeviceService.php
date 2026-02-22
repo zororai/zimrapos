@@ -1686,10 +1686,13 @@ class ZimraDeviceService
         */
         $primaryTax = $receiptData['receiptTaxes'][0] ?? [];
 
+        // Determine receiptType based on VAT registration (fallback if not set in receiptData)
+        $defaultReceiptType = (!$vatNumber || $vatNumber === 'NOT_REGISTERED') ? 'FiscalReceipt' : 'FiscalInvoice';
+        
         $receipt = Receipt::create([
             'device_id' => $deviceId,
             'invoice_no' => $receiptData['invoiceNo'] ?? 'N/A',
-            'receipt_type' => $receiptData['receiptType'] ?? 'FiscalInvoice',
+            'receipt_type' => $receiptData['receiptType'] ?? $defaultReceiptType,
             'receipt_currency' => $receiptData['receiptCurrency'] ?? 'USD',
             'receipt_counter' => $receiptData['receiptCounter'],
             'receipt_global_no' => $receiptData['receiptGlobalNo'],
@@ -1867,19 +1870,29 @@ class ZimraDeviceService
     */
     private function buildAndValidateReceiptBCMath(array $receiptData, int $fiscalDayNo, array $fdmsTaxes = []): array
     {
-        // Default to tax-inclusive (true) per ZIMRA standard
-        // FORCE correct tax mode based on VAT registration
-$configResponse = $this->getConfig();
-$vatNumber = $configResponse['vatNumber'] ?? null;
+        // Determine receiptLinesTaxInclusive based on VAT status and tax rates
+        $configResponse = $this->getConfig();
+        $vatNumber = $configResponse['vatNumber'] ?? null;
 
-if (!$vatNumber || $vatNumber === 'NOT_REGISTERED') {
-    $taxInclusive = false;   // 🔥 MUST be false for non-VAT devices
-} else {
-    $taxInclusive = $receiptData['receiptLinesTaxInclusive'] ?? false;
-}
+        // Check if all receipt line taxPercent values are 0.0
+        $allTaxPercentZero = true;
+        foreach ($receiptData['receiptLines'] ?? [] as $line) {
+            $lineTaxPercent = (float) ($line['taxPercent'] ?? 0.0);
+            if ($lineTaxPercent > 0.0) {
+                $allTaxPercentZero = false;
+                break;
+            }
+        }
 
-$receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
-        $receiptData['receiptLinesTaxInclusive'] = (bool) $taxInclusive;
+        if (!$vatNumber || $vatNumber === 'NOT_REGISTERED' || $allTaxPercentZero) {
+            // Non-VAT device OR all tax rates are 0% → use FALSE
+            $taxInclusive = false;
+        } else {
+            // VAT taxpayer with non-zero tax → use TRUE
+            $taxInclusive = true;
+        }
+
+        $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
 
         // Build tax lookup from FDMS config - CRITICAL for RCPT012/RCPT014
         // Map by taxPercent (sandbox doesn't provide taxCode)
@@ -1940,8 +1953,16 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
         $calculatedReceiptTotal = '0.00';
 
         foreach ($receiptLines as $index => &$line) {
-            $price = $this->bcFormat($line['receiptLinePrice'] ?? '0');
-            $quantity = $this->bcFormat($line['receiptLineQuantity'] ?? '1');
+            // Store original values before rebuilding line
+            $originalLineType = $line['receiptLineType'] ?? 'Sale';
+            $originalLineName = $line['receiptLineName'] ?? 'Item';
+            $originalHSCode = $line['receiptLineHSCode'] ?? '00000000';
+            
+            // CRITICAL: Round price and quantity FIRST, then calculate lineTotal
+            // FDMS recalculates: rounded_price × rounded_quantity
+            // We must use the SAME rounded values to avoid RCPT020
+            $priceRounded = $this->bcRound($this->bcFormat($line['receiptLinePrice'] ?? '0'), 2);
+            $quantityRounded = $this->bcRound($this->bcFormat($line['receiptLineQuantity'] ?? '1'), 2);
             
             // Get tax info from line (could be taxCode or taxPercent)
             $lineTaxCode = $line['taxCode'] ?? null;
@@ -1986,56 +2007,59 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
                 'taxValidTill' => $fdmsTax['taxValidTill'] ?? 'NOT_SET',
             ]);
 
-            // FDMS RULE: Round gross FIRST (price * quantity)
-            $lineNet = $this->bcRound(bcmul($price, $quantity, 6), 2);
+            // FDMS RULE: Calculate lineTotal from ROUNDED price × quantity (scale 2)
+            // This matches exactly what FDMS will recalculate
+            $lineTotal = bcmul($priceRounded, $quantityRounded, 2);
 
             // ZIMRA RULE: receiptLinesTaxInclusive determines tax calculation
-      if ($taxInclusive) {
-    // TRUE = Prices INCLUDE tax (GROSS)
-    $salesAmountWithTax = $lineNet;
-    $divisor = bcadd('100', $taxPercent, 6);
-    $taxAmount = $this->bcRound(
-        bcdiv(bcmul($lineNet, $taxPercent, 6), $divisor, 6),
-        2
-    );
-} else {
-    // FALSE = Prices EXCLUDE tax (NET)
-    $taxAmount = $this->bcRound(
-        bcdiv(bcmul($lineNet, $taxPercent, 6), '100', 6),
-        2
-    );
-    $salesAmountWithTax = $this->bcRound(
-        bcadd($lineNet, $taxAmount, 6),
-        2
-    );
-}
+            if ($taxInclusive) {
+                // TRUE = Prices INCLUDE tax (GROSS) - lineTotal already includes tax
+                $salesAmountWithTax = $lineTotal;
+                $divisor = bcadd('100', $taxPercent, 6);
+                $taxAmount = $this->bcRound(
+                    bcdiv(bcmul($lineTotal, $taxPercent, 6), $divisor, 6),
+                    2
+                );
+            } else {
+                // FALSE = Prices EXCLUDE tax (NET) - add tax to lineTotal
+                $taxAmount = $this->bcRound(
+                    bcdiv(bcmul($lineTotal, $taxPercent, 6), '100', 6),
+                    2
+                );
+                $salesAmountWithTax = bcadd($lineTotal, $taxAmount, 2);
+            }
 
             // CRITICAL: Rebuild line with fields in EXACT order per FDMS spec
             // Field order matters for signature verification
-            // CAST TO FLOAT after bcRound - FDMS expects JSON numbers, not strings
+            // FDMS expects numeric values (floats), not strings
             $line = [
-                'receiptLineType' => $line['receiptLineType'] ?? 'Sale',
-                'receiptLineNo' => (int) ($line['receiptLineNo'] ?? $index + 1),
-                'receiptLineHSCode' => $line['receiptLineHSCode'] ?? '00000000',
-                'receiptLineName' => $line['receiptLineName'] ?? 'Item',
-                'receiptLinePrice' => (float) $this->bcRound($price, 2),
-                'receiptLineQuantity' => (float) $this->bcRound($quantity, 2),
-                'receiptLineTotal' => (float) $lineNet,
+                'receiptLineType' => $originalLineType,
+                'receiptLineNo' => (int) ($index + 1),
             ];
+            
+            // Only include receiptLineHSCode for VAT registered taxpayers
+            if ($vatNumber && $vatNumber !== 'NOT_REGISTERED') {
+                $line['receiptLineHSCode'] = $originalHSCode;
+            }
+            
+            $line['receiptLineName'] = $originalLineName;
+            $line['receiptLinePrice'] = (float) number_format((float) bcadd($priceRounded, '0', 2), 2, '.', '');
+            $line['receiptLineQuantity'] = (float) number_format((float) bcadd($quantityRounded, '0', 2), 2, '.', '');
+            $line['receiptLineTotal'] = (float) number_format((float) bcadd($lineTotal, '0', 2), 2, '.', '');
             
             // Only include taxCode if FDMS provided one (sandbox doesn't)
             if ($taxCode !== null && $taxCode !== '') {
                 $line['taxCode'] = $taxCode;
             }
             
-            $line['taxPercent'] = (float) $taxPercent;
+            $line['taxPercent'] = (float) number_format((float) bcadd($taxPercent, '0', 2), 2, '.', '');
             $line['taxID'] = (int) $taxID;
 
             // Accumulate tax totals by taxID (use scale 2 - accumulate ROUNDED values)
             $taxKey = (string) $taxID;
             if (!isset($taxTotals[$taxKey])) {
                 $taxTotals[$taxKey] = [
-                    'taxPercent' => (float) $taxPercent,
+                    'taxPercent' => (float) number_format((float) bcadd($taxPercent, '0', 2), 2, '.', ''),
                     'taxID' => (int) $taxID,
                     'taxAmount' => '0.00',
                     'salesAmountWithTax' => '0.00',
@@ -2054,11 +2078,11 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
 
             Log::debug('Receipt Line Calculation (BCMath)', [
                 'line_no' => $line['receiptLineNo'] ?? $index + 1,
-                'price' => $price,
-                'quantity' => $quantity,
+                'price' => $priceRounded,
+                'quantity' => $quantityRounded,
                 'tax_percent' => $taxPercent,
                 'tax_inclusive' => $taxInclusive,
-                'line_net' => $lineNet,
+                'line_total' => $lineTotal,
                 'tax_amount' => $taxAmount,
                 'sales_amount_with_tax' => $salesAmountWithTax,
             ]);
@@ -2070,14 +2094,14 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
         // Receipt total already accumulated at scale 2 - no additional rounding needed
         // $calculatedReceiptTotal is already correct
         
-        // Convert tax totals - CAST TO FLOAT (already accumulated at scale 2)
+        // Convert tax totals - FDMS expects numeric values (floats), not strings
         $formattedTaxes = [];
         foreach ($taxTotals as $tax) {
             $taxEntry = [
-                'taxPercent' => (float) $tax['taxPercent'],
+                'taxPercent' => (float) number_format((float) bcadd($tax['taxPercent'], '0', 2), 2, '.', ''),
                 'taxID' => (int) $tax['taxID'],
-                'taxAmount' => (float) $tax['taxAmount'],
-                'salesAmountWithTax' => (float) $tax['salesAmountWithTax'],
+                'taxAmount' => (float) number_format((float) bcadd($tax['taxAmount'], '0', 2), 2, '.', ''),
+                'salesAmountWithTax' => (float) number_format((float) bcadd($tax['salesAmountWithTax'], '0', 2), 2, '.', ''),
             ];
             
             // Only include taxCode if FDMS provided one
@@ -2087,13 +2111,15 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
             
             $formattedTaxes[] = $taxEntry;
         }
+        
+        // FDMS requires receiptTaxes even for non-VAT devices
         $receiptData['receiptTaxes'] = $formattedTaxes;
 
-        // Set receipt total - CAST TO FLOAT (FDMS expects JSON numbers)
-        $receiptData['receiptTotal'] = (float) $calculatedReceiptTotal;
+        // Set receipt total - FDMS expects numeric value (float), not string
+        $receiptData['receiptTotal'] = (float) number_format((float) bcadd($calculatedReceiptTotal, '0', 2), 2, '.', '');
 
         Log::debug('Receipt Tax Totals (BCMath)', [
-            'taxes' => $receiptData['receiptTaxes'],
+            'taxes' => $formattedTaxes,
             'calculated_receipt_total' => $calculatedReceiptTotal,
         ]);
 
@@ -2107,8 +2133,8 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
 
         foreach ($payments as &$payment) {
             $paymentAmount = $this->bcFormat($payment['paymentAmount'] ?? '0');
-            // CAST TO FLOAT (FDMS expects JSON numbers)
-            $payment['paymentAmount'] = (float) $this->bcRound($paymentAmount, 2);
+            // FDMS expects numeric value (float), not string
+            $payment['paymentAmount'] = (float) number_format((float) bcadd($this->bcRound($paymentAmount, 2), '0', 2), 2, '.', '');
             $totalPayments = bcadd($totalPayments, $paymentAmount, 2);
         }
         unset($payment);
@@ -2137,7 +2163,7 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
         |--------------------------------------------------------------------------
         */
         $totalSalesWithTax = '0.00';
-        foreach ($receiptData['receiptTaxes'] as $tax) {
+        foreach ($formattedTaxes as $tax) {
             $totalSalesWithTax = bcadd($totalSalesWithTax, $this->bcFormat($tax['salesAmountWithTax']), 2);
         }
 
@@ -2161,7 +2187,7 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
             'receipt_total' => $calculatedReceiptTotal,
             'tax_inclusive' => $taxInclusive,
             'line_count' => count($receiptLines),
-            'tax_groups' => count($receiptData['receiptTaxes']),
+            'tax_groups' => count($formattedTaxes),
             'fiscal_day_no' => $fiscalDayNo,
         ]);
 
@@ -2170,8 +2196,11 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
         | Build Canonical Receipt Structure
         |--------------------------------------------------------------------------
         */
+        // Determine receiptType based on VAT registration
+        $defaultReceiptType = (!$vatNumber || $vatNumber === 'NOT_REGISTERED') ? 'FiscalReceipt' : 'FiscalInvoice';
+        
         $canonicalReceipt = [
-            'receiptType' => $receiptData['receiptType'] ?? 'FiscalInvoice',
+            'receiptType' => $receiptData['receiptType'] ?? $defaultReceiptType,
             'receiptCurrency' => $receiptData['receiptCurrency'] ?? 'USD',
             'receiptCounter' => (int) ($receiptData['receiptCounter'] ?? 1),
             'receiptGlobalNo' => (int) ($receiptData['receiptGlobalNo'] ?? 1),
@@ -2179,11 +2208,13 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
             'receiptDate' => $receiptData['receiptDate'] ?? date('Y-m-d\TH:i:s'),
             'receiptLinesTaxInclusive' => $taxInclusive,
             'receiptLines' => $receiptData['receiptLines'],
-            'receiptTaxes' => $receiptData['receiptTaxes'],
-            'receiptPayments' => $receiptData['receiptPayments'],
-            'receiptTotal' => $receiptData['receiptTotal'],
-            'receiptPrintForm' => $receiptData['receiptPrintForm'] ?? 'Receipt48',
         ];
+        
+        // FDMS requires receiptTaxes for all devices (including non-VAT)
+        $canonicalReceipt['receiptTaxes'] = $formattedTaxes;
+        $canonicalReceipt['receiptPayments'] = $receiptData['receiptPayments'];
+        $canonicalReceipt['receiptTotal'] = $receiptData['receiptTotal'];
+        $canonicalReceipt['receiptPrintForm'] = $receiptData['receiptPrintForm'] ?? 'Receipt48';
 
         // Add optional fields if present
         if (!empty($receiptData['buyerData'])) {
@@ -2219,6 +2250,15 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
         return bcdiv(bcadd(bcmul($value, $pow, $precision + 1), '0.5', $precision + 1), $pow, $precision);
     }
 
+    /**
+     * Format monetary value as string with exact 2 decimal places
+     * CRITICAL: FDMS requires exact decimal formatting - never use (float) cast
+     */
+    private function money(string $value): string
+    {
+        return number_format((float)$value, 2, '.', '');
+    }
+
     /*
     |--------------------------------------------------------------------------
     | Build Canonical Receipt Payload - FDMS API v7.2 Compliant
@@ -2230,6 +2270,10 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
     */
     private function buildCanonicalReceiptPayload(array $receiptData, array $fdmsTaxes = []): array
     {
+        // Get VAT registration status
+        $configResponse = $this->getConfig();
+        $vatNumber = $configResponse['vatNumber'] ?? null;
+        
         // Default to tax-inclusive unless explicitly set
         $taxInclusive = $receiptData['receiptLinesTaxInclusive'] ?? true;
 
@@ -2272,10 +2316,20 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
                 $salesAmountWithTax = round($lineTotal + $taxAmount, 2, PHP_ROUND_HALF_UP);
             }
 
+            // Store original HSCode before updating line
+            $originalHSCode = $line['receiptLineHSCode'] ?? '00000000';
+            
             // Update line with calculated values
             $line['receiptLineType'] = $line['receiptLineType'] ?? 'Sale';
             $line['receiptLineNo'] = (int) ($line['receiptLineNo'] ?? $index + 1);
-            $line['receiptLineHSCode'] = $line['receiptLineHSCode'] ?? '00000000';
+            
+            // Only include receiptLineHSCode for VAT registered taxpayers
+            if ($vatNumber && $vatNumber !== 'NOT_REGISTERED') {
+                $line['receiptLineHSCode'] = $originalHSCode;
+            } else {
+                unset($line['receiptLineHSCode']);
+            }
+            
             $line['receiptLineName'] = $line['receiptLineName'] ?? 'Item';
             $line['receiptLinePrice'] = $price;
             $line['receiptLineQuantity'] = $quantity;
@@ -2304,17 +2358,17 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
         unset($line);
 
         // Round accumulated totals
-        $receiptTotal = round($sumOfLineTotals, 2, PHP_ROUND_HALF_UP);
+        $receiptTotal = (float) number_format(round($sumOfLineTotals, 2, PHP_ROUND_HALF_UP), 2, '.', '');
 
         // Format taxes with rounding
         $formattedTaxes = [];
         $sumOfTaxSales = 0.0;
         foreach ($taxTotals as $tax) {
-            $roundedTaxAmount = round($tax['taxAmount'], 2, PHP_ROUND_HALF_UP);
-            $roundedSalesWithTax = round($tax['salesAmountWithTax'], 2, PHP_ROUND_HALF_UP);
+            $roundedTaxAmount = (float) number_format(round($tax['taxAmount'], 2, PHP_ROUND_HALF_UP), 2, '.', '');
+            $roundedSalesWithTax = (float) number_format(round($tax['salesAmountWithTax'], 2, PHP_ROUND_HALF_UP), 2, '.', '');
             $formattedTaxes[] = [
                 'taxCode' => $tax['taxCode'],
-                'taxPercent' => $tax['taxPercent'],
+                'taxPercent' => (float) number_format($tax['taxPercent'], 2, '.', ''),
                 'taxID' => $tax['taxID'],
                 'taxAmount' => $roundedTaxAmount,
                 'salesAmountWithTax' => $roundedSalesWithTax,
@@ -2327,7 +2381,7 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
         $formattedPayments = [];
         $sumOfPayments = 0.0;
         foreach ($payments as $payment) {
-            $paymentAmount = round((float) ($payment['paymentAmount'] ?? $receiptTotal), 2, PHP_ROUND_HALF_UP);
+            $paymentAmount = (float) number_format(round((float) ($payment['paymentAmount'] ?? $receiptTotal), 2, PHP_ROUND_HALF_UP), 2, '.', '');
             $formattedPayments[] = [
                 'moneyTypeCode' => $payment['moneyTypeCode'] ?? 'Cash',
                 'paymentAmount' => $paymentAmount,
@@ -2339,14 +2393,17 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
         if (empty($formattedPayments)) {
             $formattedPayments[] = [
                 'moneyTypeCode' => 'Cash',
-                'paymentAmount' => $receiptTotal,
+                'paymentAmount' => (float) number_format($receiptTotal, 2, '.', ''),
             ];
             $sumOfPayments = $receiptTotal;
         }
 
         // Build canonical receipt - NO fiscalDayNo, NO receiptDeviceSignature
+        // Determine receiptType based on VAT registration
+        $defaultReceiptType = (!$vatNumber || $vatNumber === 'NOT_REGISTERED') ? 'FiscalReceipt' : 'FiscalInvoice';
+        
         $canonical = [
-            'receiptType' => $receiptData['receiptType'] ?? 'FiscalInvoice',
+            'receiptType' => $receiptData['receiptType'] ?? $defaultReceiptType,
             'receiptCurrency' => $receiptData['receiptCurrency'] ?? 'USD',
             'receiptCounter' => (int) ($receiptData['receiptCounter'] ?? 1),
             'receiptGlobalNo' => (int) ($receiptData['receiptGlobalNo'] ?? 1),
@@ -2354,11 +2411,13 @@ $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
             'receiptDate' => $receiptData['receiptDate'] ?? date('Y-m-d\TH:i:s'),
             'receiptLinesTaxInclusive' => $taxInclusive,
             'receiptLines' => $receiptLines,
-            'receiptTaxes' => $formattedTaxes,
-            'receiptPayments' => $formattedPayments,
-            'receiptTotal' => $receiptTotal,
-            'receiptPrintForm' => $receiptData['receiptPrintForm'] ?? 'Receipt48',
         ];
+        
+        // FDMS requires receiptTaxes for all devices (including non-VAT)
+        $canonical['receiptTaxes'] = $formattedTaxes;
+        $canonical['receiptPayments'] = $formattedPayments;
+        $canonical['receiptTotal'] = $receiptTotal;
+        $canonical['receiptPrintForm'] = $receiptData['receiptPrintForm'] ?? 'Receipt48';
 
         // Add optional fields if present
         if (!empty($receiptData['buyerData'])) {
@@ -3055,8 +3114,28 @@ private function validateReceiptTotals(array $receipt): void
     */
     private function buildAndValidateReceipt(array $receiptData, FiscalDay $fiscalDay, array $fdmsTaxes = []): array
     {
-        // Default to tax-exclusive unless explicitly set
-        $taxInclusive = $receiptData['receiptLinesTaxInclusive'] ?? false;
+        // Determine receiptLinesTaxInclusive based on VAT status and tax rates
+        $configResponse = $this->getConfig();
+        $vatNumber = $configResponse['vatNumber'] ?? null;
+
+        // Check if all receipt line taxPercent values are 0.0
+        $allTaxPercentZero = true;
+        foreach ($receiptData['receiptLines'] ?? [] as $line) {
+            $lineTaxPercent = (float) ($line['taxPercent'] ?? 0.0);
+            if ($lineTaxPercent > 0.0) {
+                $allTaxPercentZero = false;
+                break;
+            }
+        }
+
+        if (!$vatNumber || $vatNumber === 'NOT_REGISTERED' || $allTaxPercentZero) {
+            // Non-VAT device OR all tax rates are 0% → use FALSE
+            $taxInclusive = false;
+        } else {
+            // VAT taxpayer with non-zero tax → use TRUE
+            $taxInclusive = true;
+        }
+
         $receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
 
         // Build tax lookup from FDMS config
