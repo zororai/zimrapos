@@ -1868,7 +1868,17 @@ class ZimraDeviceService
     private function buildAndValidateReceiptBCMath(array $receiptData, int $fiscalDayNo, array $fdmsTaxes = []): array
     {
         // Default to tax-inclusive (true) per ZIMRA standard
-        $taxInclusive = $receiptData['receiptLinesTaxInclusive'] ?? true;
+        // FORCE correct tax mode based on VAT registration
+$configResponse = $this->getConfig();
+$vatNumber = $configResponse['vatNumber'] ?? null;
+
+if (!$vatNumber || $vatNumber === 'NOT_REGISTERED') {
+    $taxInclusive = false;   // 🔥 MUST be false for non-VAT devices
+} else {
+    $taxInclusive = $receiptData['receiptLinesTaxInclusive'] ?? false;
+}
+
+$receiptData['receiptLinesTaxInclusive'] = $taxInclusive;
         $receiptData['receiptLinesTaxInclusive'] = (bool) $taxInclusive;
 
         // Build tax lookup from FDMS config - CRITICAL for RCPT012/RCPT014
@@ -1980,20 +1990,25 @@ class ZimraDeviceService
             $lineNet = $this->bcRound(bcmul($price, $quantity, 6), 2);
 
             // ZIMRA RULE: receiptLinesTaxInclusive determines tax calculation
-            if ($taxInclusive) {
-                // TRUE = Tax-exclusive pricing (NET prices, tax added on top)
-                // taxAmount = ROUND(lineNet * taxPercent / 100, 2)
-                // salesAmountWithTax = ROUND(lineNet + taxAmount, 2)
-                $taxAmount = $this->bcRound(bcdiv(bcmul($lineNet, $taxPercent, 6), '100', 6), 2);
-                $salesAmountWithTax = $this->bcRound(bcadd($lineNet, $taxAmount, 6), 2);
-            } else {
-                // FALSE = Tax-inclusive pricing (GROSS prices, tax extracted)
-                // salesAmountWithTax = lineNet (already rounded)
-                // taxAmount = ROUND(lineNet * taxPercent / (100 + taxPercent), 2)
-                $salesAmountWithTax = $lineNet;
-                $divisor = bcadd('100', $taxPercent, 6);
-                $taxAmount = $this->bcRound(bcdiv(bcmul($lineNet, $taxPercent, 6), $divisor, 6), 2);
-            }
+      if ($taxInclusive) {
+    // TRUE = Prices INCLUDE tax (GROSS)
+    $salesAmountWithTax = $lineNet;
+    $divisor = bcadd('100', $taxPercent, 6);
+    $taxAmount = $this->bcRound(
+        bcdiv(bcmul($lineNet, $taxPercent, 6), $divisor, 6),
+        2
+    );
+} else {
+    // FALSE = Prices EXCLUDE tax (NET)
+    $taxAmount = $this->bcRound(
+        bcdiv(bcmul($lineNet, $taxPercent, 6), '100', 6),
+        2
+    );
+    $salesAmountWithTax = $this->bcRound(
+        bcadd($lineNet, $taxAmount, 6),
+        2
+    );
+}
 
             // CRITICAL: Rebuild line with fields in EXACT order per FDMS spec
             // Field order matters for signature verification
@@ -2375,61 +2390,87 @@ class ZimraDeviceService
     | Validates that receiptTotal = SUM(receiptLineTotal) = SUM(salesAmountWithTax) = SUM(paymentAmount)
     |--------------------------------------------------------------------------
     */
-    private function validateReceiptTotals(array $receipt): void
-    {
-        $receiptTotal = (float) ($receipt['receiptTotal'] ?? 0);
-        
-        // Sum of receipt line totals (salesAmountWithTax for tax-inclusive)
-        $sumLineTotals = 0.0;
-        foreach ($receipt['receiptLines'] ?? [] as $line) {
-            $sumLineTotals += (float) ($line['receiptLineTotal'] ?? 0);
-        }
-        $sumLineTotals = round($sumLineTotals, 2, PHP_ROUND_HALF_UP);
+ /*
+|--------------------------------------------------------------------------
+| Validate Receipt Totals - RCPT020 Prevention (FDMS v7.2 Correct Logic)
+|--------------------------------------------------------------------------
+| FDMS validates ONLY:
+|   1) receiptTotal == SUM(salesAmountWithTax)
+|   2) receiptTotal == SUM(paymentAmount)
+|
+| FDMS DOES NOT validate against receiptLineTotal.
+|--------------------------------------------------------------------------
+*/
+private function validateReceiptTotals(array $receipt): void
+{
+    $tolerance = 0.01;
 
-        // Sum of salesAmountWithTax from taxes
-        $sumTaxSales = 0.0;
-        foreach ($receipt['receiptTaxes'] ?? [] as $tax) {
-            $sumTaxSales += (float) ($tax['salesAmountWithTax'] ?? 0);
-        }
-        $sumTaxSales = round($sumTaxSales, 2, PHP_ROUND_HALF_UP);
+    // Normalize receiptTotal
+    $receiptTotal = round((float) ($receipt['receiptTotal'] ?? 0), 2, PHP_ROUND_HALF_UP);
 
-        // Sum of payments
-        $sumPayments = 0.0;
-        foreach ($receipt['receiptPayments'] ?? [] as $payment) {
-            $sumPayments += (float) ($payment['paymentAmount'] ?? 0);
-        }
-        $sumPayments = round($sumPayments, 2, PHP_ROUND_HALF_UP);
+    /*
+    |--------------------------------------------------------------------------
+    | 1️⃣ Validate Against salesAmountWithTax
+    |--------------------------------------------------------------------------
+    */
+    $sumSalesWithTax = 0.0;
 
-        Log::info('VALIDATE_RECEIPT_TOTALS', [
-            'receiptTotal' => $receiptTotal,
-            'sumLineTotals' => $sumLineTotals,
-            'sumTaxSales' => $sumTaxSales,
-            'sumPayments' => $sumPayments,
-        ]);
-
-        // Validate totals match
-        $tolerance = 0.01; // Allow 1 cent tolerance for rounding
-        
-        if (abs($receiptTotal - $sumLineTotals) > $tolerance) {
-            throw new \Exception(
-                "RCPT020 Prevention: receiptTotal ({$receiptTotal}) != SUM(receiptLineTotal) ({$sumLineTotals})"
-            );
-        }
-
-        if (abs($receiptTotal - $sumTaxSales) > $tolerance) {
-            throw new \Exception(
-                "RCPT020 Prevention: receiptTotal ({$receiptTotal}) != SUM(salesAmountWithTax) ({$sumTaxSales})"
-            );
-        }
-
-        if (abs($receiptTotal - $sumPayments) > $tolerance) {
-            throw new \Exception(
-                "RCPT020 Prevention: receiptTotal ({$receiptTotal}) != SUM(paymentAmount) ({$sumPayments})"
-            );
-        }
-
-        Log::info('VALIDATE_RECEIPT_TOTALS_PASSED');
+    foreach ($receipt['receiptTaxes'] ?? [] as $tax) {
+        $sumSalesWithTax += (float) ($tax['salesAmountWithTax'] ?? 0);
     }
+
+    $sumSalesWithTax = round($sumSalesWithTax, 2, PHP_ROUND_HALF_UP);
+
+    /*
+    |--------------------------------------------------------------------------
+    | 2️⃣ Validate Against Payments
+    |--------------------------------------------------------------------------
+    */
+    $sumPayments = 0.0;
+
+    foreach ($receipt['receiptPayments'] ?? [] as $payment) {
+        $sumPayments += (float) ($payment['paymentAmount'] ?? 0);
+    }
+
+    $sumPayments = round($sumPayments, 2, PHP_ROUND_HALF_UP);
+
+    /*
+    |--------------------------------------------------------------------------
+    | Debug Logging
+    |--------------------------------------------------------------------------
+    */
+    Log::info('VALIDATE_RECEIPT_TOTALS', [
+        'receiptTotal'        => $receiptTotal,
+        'sumSalesWithTax'     => $sumSalesWithTax,
+        'sumPayments'         => $sumPayments,
+        'difference_tax'      => round($receiptTotal - $sumSalesWithTax, 4),
+        'difference_payment'  => round($receiptTotal - $sumPayments, 4),
+    ]);
+
+    /*
+    |--------------------------------------------------------------------------
+    | FDMS RULE #1
+    |--------------------------------------------------------------------------
+    */
+    if (abs($receiptTotal - $sumSalesWithTax) > $tolerance) {
+        throw new \Exception(
+            "RCPT020 Prevention: receiptTotal ({$receiptTotal}) != SUM(salesAmountWithTax) ({$sumSalesWithTax})"
+        );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | FDMS RULE #2
+    |--------------------------------------------------------------------------
+    */
+    if (abs($receiptTotal - $sumPayments) > $tolerance) {
+        throw new \Exception(
+            "RCPT020 Prevention: receiptTotal ({$receiptTotal}) != SUM(paymentAmount) ({$sumPayments})"
+        );
+    }
+
+    Log::info('VALIDATE_RECEIPT_TOTALS_PASSED');
+}
 
     /*
     |--------------------------------------------------------------------------
