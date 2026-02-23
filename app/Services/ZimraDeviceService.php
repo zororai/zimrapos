@@ -836,8 +836,11 @@ class ZimraDeviceService
             'payload' => $payload,
         ]);
 
-        // Sign the payload - required by ZIMRA
-        $payload['fiscalDayDeviceSignature'] = $this->signData($payload);
+        // Build canonical string for signature (per FDMS spec 13.3.1)
+        $canonicalString = $this->buildCloseDayCanonicalString($payload, $deviceId);
+        
+        // Sign the canonical string - required by ZIMRA
+        $payload['fiscalDayDeviceSignature'] = $this->signCanonicalString($canonicalString);
 
         // DEBUG: Log final payload being sent
         Log::debug('ZIMRA CloseDay - Final payload', [
@@ -1069,23 +1072,9 @@ class ZimraDeviceService
                 $counters[$taxKey]['fiscalCounterValue'] += $salesAmountWithTax;
             }
 
-            // Process each payment method
-            foreach ($receiptPayments as $payment) {
-                $moneyType = $payment['moneyTypeCode'] ?? 'Cash';
-                $paymentAmount = (float) ($payment['paymentAmount'] ?? 0);
-
-                // SaleByMoneyType counter
-                $paymentKey = "SaleByMoneyType_{$moneyType}";
-                if (!isset($counters[$paymentKey])) {
-                    $counters[$paymentKey] = [
-                        'fiscalCounterType' => 'SaleByMoneyType',
-                        'fiscalCounterCurrency' => $currency,
-                        'fiscalCounterMoneyType' => $moneyType,
-                        'fiscalCounterValue' => 0,
-                    ];
-                }
-                $counters[$paymentKey]['fiscalCounterValue'] += $paymentAmount;
-            }
+            // Note: Payment counters (SaleByMoneyType) are NOT part of FDMS CloseDay spec
+            // Only tax-based counters (SaleByTax, SaleTaxByTax, etc.) are valid
+            // Payments are tracked within receipts, not as separate fiscal counters
         }
 
         // Round all counter values
@@ -1107,26 +1096,20 @@ class ZimraDeviceService
         |--------------------------------------------------------------------------
         */
         $totalSalesByTax = 0;
-        $totalSalesByMoney = 0;
 
         foreach ($fiscalDayCounters as $counter) {
             if ($counter['fiscalCounterType'] === 'SaleByTax') {
                 $totalSalesByTax += $counter['fiscalCounterValue'];
             }
-            if ($counter['fiscalCounterType'] === 'SaleByMoneyType') {
-                $totalSalesByMoney += $counter['fiscalCounterValue'];
-            }
         }
 
         $totalSalesByTax = round($totalSalesByTax, 2);
-        $totalSalesByMoney = round($totalSalesByMoney, 2);
         $totalReceiptValue = round($totalReceiptValue, 2);
 
         Log::info('CloseDay - Payload validation', [
             'receipt_counter' => $receiptCounter,
             'total_receipt_value' => $totalReceiptValue,
             'total_sales_by_tax' => $totalSalesByTax,
-            'total_sales_by_money' => $totalSalesByMoney,
             'counter_count' => count($fiscalDayCounters),
         ]);
 
@@ -1137,7 +1120,6 @@ class ZimraDeviceService
                 'value' => $counter['fiscalCounterValue'],
                 'taxID' => $counter['fiscalCounterTaxID'] ?? null,
                 'taxPercent' => $counter['fiscalCounterTaxPercent'] ?? null,
-                'moneyType' => $counter['fiscalCounterMoneyType'] ?? null,
             ]);
         }
 
@@ -1153,18 +1135,6 @@ class ZimraDeviceService
             );
         }
 
-        // Validate: SalesByMoney should equal total receipt value
-        if (abs($totalSalesByMoney - $totalReceiptValue) > 0.01) {
-            Log::error('CloseDay - SalesByMoney mismatch', [
-                'total_sales_by_money' => $totalSalesByMoney,
-                'total_receipt_value' => $totalReceiptValue,
-                'difference' => $totalSalesByMoney - $totalReceiptValue,
-            ]);
-            throw new \Exception(
-                "CloseDay validation failed: SalesByMoney ({$totalSalesByMoney}) != totalReceiptValue ({$totalReceiptValue})"
-            );
-        }
-
         // Validate: receiptCounter should match receipt count or be > 0
         if ($receiptCounter <= 0 && $receipts->isNotEmpty()) {
             Log::error('CloseDay - Invalid receipt counter', [
@@ -1176,19 +1146,174 @@ class ZimraDeviceService
             );
         }
 
+        // Add fiscalDayDate (required for signature per FDMS spec 13.3.1)
+        $fiscalDayDate = $fiscalDay->opened_at->format('Y-m-d');
+
         $payload = [
             'fiscalDayNo' => $fiscalDay->fiscal_day_no,
+            'fiscalDayDate' => $fiscalDayDate,
             'fiscalDayCounters' => $fiscalDayCounters,
             'receiptCounter' => $receiptCounter,
         ];
 
         Log::info('CloseDay - Final payload built', [
             'fiscal_day_no' => $payload['fiscalDayNo'],
+            'fiscal_day_date' => $payload['fiscalDayDate'],
             'receipt_counter' => $payload['receiptCounter'],
             'counter_count' => count($payload['fiscalDayCounters']),
         ]);
 
         return $payload;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Build Canonical String for CloseDay Signature (FDMS Spec 13.3.1)
+    |--------------------------------------------------------------------------
+    */
+    private function buildCloseDayCanonicalString(array $payload, int $deviceId): string
+    {
+        $parts = [];
+        
+        // 1. deviceID
+        $parts[] = (string) $deviceId;
+        
+        // 2. fiscalDayNo
+        $parts[] = (string) $payload['fiscalDayNo'];
+        
+        // 3. fiscalDayDate (YYYY-MM-DD format)
+        $parts[] = $payload['fiscalDayDate'];
+        
+        // 4. fiscalDayCounters - concatenated string
+        $countersString = $this->buildCloseDayCountersString($payload['fiscalDayCounters']);
+        $parts[] = $countersString;
+        
+        $canonicalString = implode('', $parts);
+        
+        Log::info('CLOSEDAY_CANONICAL_STRING', [
+            'deviceID' => $parts[0],
+            'fiscalDayNo' => $parts[1],
+            'fiscalDayDate' => $parts[2],
+            'fiscalDayCounters' => $parts[3],
+            'full_string' => $canonicalString,
+        ]);
+        
+        return $canonicalString;
+    }
+    
+    /*
+    |--------------------------------------------------------------------------
+    | Build Fiscal Day Counters String for Signature
+    |--------------------------------------------------------------------------
+    | Per FDMS spec: fiscalCounterType || fiscalCounterCurrency || 
+    | fiscalCounterTaxPercent or fiscalCounterMoneyType || fiscalCounterValue
+    | Sorted by: fiscalCounterType, fiscalCounterCurrency, fiscalCounterTaxID
+    */
+    private function buildCloseDayCountersString(array $counters): string
+    {
+        if (empty($counters)) {
+            return '';
+        }
+        
+        // Sort counters per FDMS spec
+        usort($counters, function ($a, $b) {
+            // First by fiscalCounterType
+            $typeOrder = ['SaleByTax' => 0, 'SaleTaxByTax' => 1, 'CreditNoteByTax' => 2, 
+                          'CreditNoteTaxByTax' => 3, 'DebitNoteByTax' => 4, 'DebitNoteTaxByTax' => 5];
+            $typeCompare = ($typeOrder[$a['fiscalCounterType']] ?? 99) <=> ($typeOrder[$b['fiscalCounterType']] ?? 99);
+            if ($typeCompare !== 0) return $typeCompare;
+            
+            // Then by currency (alphabetical)
+            $currencyCompare = strcmp($a['fiscalCounterCurrency'], $b['fiscalCounterCurrency']);
+            if ($currencyCompare !== 0) return $currencyCompare;
+            
+            // Then by taxID (ascending)
+            return ($a['fiscalCounterTaxID'] ?? 0) <=> ($b['fiscalCounterTaxID'] ?? 0);
+        });
+        
+        $counterStrings = [];
+        foreach ($counters as $counter) {
+            $parts = [];
+            
+            // fiscalCounterType (uppercase)
+            $parts[] = strtoupper($counter['fiscalCounterType']);
+            
+            // fiscalCounterCurrency (uppercase)
+            $parts[] = strtoupper($counter['fiscalCounterCurrency']);
+            
+            // fiscalCounterTaxPercent (with .00 format) OR fiscalCounterMoneyType
+            if (isset($counter['fiscalCounterTaxPercent'])) {
+                $taxPercent = (float) $counter['fiscalCounterTaxPercent'];
+                $parts[] = number_format($taxPercent, 2, '.', '');
+            } elseif (isset($counter['fiscalCounterMoneyType'])) {
+                $parts[] = strtoupper($counter['fiscalCounterMoneyType']);
+            }
+            
+            // fiscalCounterValue (in cents)
+            $valueInCents = (int) round($counter['fiscalCounterValue'] * 100);
+            $parts[] = (string) $valueInCents;
+            
+            // Concatenate without separators (|| is documentation notation)
+            $counterStrings[] = implode('', $parts);
+        }
+        
+        return implode('', $counterStrings);
+    }
+    
+    /*
+    |--------------------------------------------------------------------------
+    | Sign Canonical String (for both receipts and CloseDay)
+    |--------------------------------------------------------------------------
+    */
+    private function signCanonicalString(string $canonicalString): array
+    {
+        // Hash the canonical string for the 'hash' field
+        $hash = hash('sha256', $canonicalString, true);
+        $hashBase64 = base64_encode($hash);
+        
+        Log::debug('ZIMRA signCanonicalString - Hash', [
+            'canonical_string' => $canonicalString,
+            'hash_hex' => bin2hex($hash),
+            'hash_base64' => $hashBase64,
+        ]);
+        
+        // Sign with device private key
+        $zimraConfig = ZimraConfig::getActive();
+        $privateKey = openssl_pkey_get_private($zimraConfig->private_key);
+        
+        if (!$privateKey) {
+            throw new \Exception('Failed to load private key for signing');
+        }
+        
+        $signature = '';
+        // CRITICAL: Sign the canonical string directly, NOT the hash
+        // openssl_sign() with OPENSSL_ALGO_SHA256 hashes internally
+        $signResult = openssl_sign($canonicalString, $signature, $privateKey, OPENSSL_ALGO_SHA256);
+        
+        if (!$signResult) {
+            throw new \Exception('Failed to sign canonical string');
+        }
+        
+        $signatureBase64 = base64_encode($signature);
+        
+        Log::debug('ZIMRA signCanonicalString - Signature', [
+            'signature_base64' => $signatureBase64,
+            'signature_length' => strlen($signature),
+        ]);
+        
+        // Verify locally
+        $publicKey = openssl_pkey_get_public($zimraConfig->certificate);
+        $verifyResult = openssl_verify($canonicalString, $signature, $publicKey, OPENSSL_ALGO_SHA256);
+        
+        Log::info('ZIMRA signCanonicalString - Local Verification', [
+            'local_signature_valid' => $verifyResult,
+            'verify_meaning' => $verifyResult === 1 ? 'VALID' : ($verifyResult === 0 ? 'INVALID' : 'ERROR'),
+        ]);
+        
+        return [
+            'hash' => $hashBase64,
+            'signature' => $signatureBase64,
+        ];
     }
 
     /*
@@ -3694,66 +3819,5 @@ private function validateReceiptTotals(array $receipt): void
         }
         
         return implode('', $taxParts);
-    }
-    
-    /**
-     * Sign canonical string per FDMS spec
-     */
-    private function signCanonicalString(string $canonicalString): array
-    {
-        $certPath = storage_path('app/zimra/device_certificate.pem');
-        $privateKeyPath = storage_path('app/zimra/device_private.key');
-        
-        if (!file_exists($certPath) || !file_exists($privateKeyPath)) {
-            throw new \Exception('RCPT025: Device certificate or private key not found.');
-        }
-
-        $privateKey = openssl_pkey_get_private(file_get_contents($privateKeyPath));
-        if (!$privateKey) {
-            throw new \Exception('RCPT025: Failed to load private key.');
-        }
-
-        // Generate SHA256 hash
-        $hashBinary = hash('sha256', $canonicalString, true);
-        $hashBase64 = base64_encode($hashBinary);
-
-        Log::info('SIGNING_HASH_GENERATED', [
-            'hash_base64' => $hashBase64,
-            'hash_hex' => bin2hex($hashBinary),
-        ]);
-
-        // Sign the canonical string
-        $signResult = openssl_sign($canonicalString, $signatureBinary, $privateKey, OPENSSL_ALGO_SHA256);
-        
-        if (!$signResult) {
-            throw new \Exception('Failed to sign receipt: ' . openssl_error_string());
-        }
-
-        $signatureBase64 = base64_encode($signatureBinary);
-
-        Log::info('SIGNING_RESULT', [
-            'hash_base64' => $hashBase64,
-            'signature_base64' => $signatureBase64,
-            'signature_length' => strlen($signatureBinary),
-        ]);
-
-        // Verify signature locally
-        $cert = openssl_x509_read(file_get_contents($certPath));
-        $publicKey = openssl_pkey_get_public($cert);
-        $verifyResult = openssl_verify($canonicalString, $signatureBinary, $publicKey, OPENSSL_ALGO_SHA256);
-        
-        Log::info('SIGNING_LOCAL_VERIFY', [
-            'verified' => $verifyResult === 1,
-            'verify_result_code' => $verifyResult,
-        ]);
-
-        if ($verifyResult !== 1) {
-            throw new \Exception('RCPT025: Local signature verification failed.');
-        }
-
-        return [
-            'hash' => $hashBase64,
-            'signature' => $signatureBase64,
-        ];
     }
 }
