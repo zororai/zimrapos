@@ -1840,6 +1840,7 @@ class ZimraDeviceService
             'receipt_lines' => $receiptData['receiptLines'],
             'receipt_taxes' => $receiptData['receiptTaxes'],
             'receipt_payments' => $receiptData['receiptPayments'],
+            'buyer_data' => $receiptData['buyerData'] ?? null,
             'receipt_hash' => $receiptData['receiptDeviceSignature']['hash'] ?? null,
             'receipt_signature' => $receiptData['receiptDeviceSignature'] ?? null,
             'zimra_response' => $responseData,

@@ -630,6 +630,95 @@
                                     </div>
                                 </div>
 
+                                <!-- Buyer Data Section (Collapsible) -->
+                                <div class="border border-gray-200 rounded-lg">
+                                    <button type="button" @click="showBuyerData = !showBuyerData" class="w-full flex items-center justify-between p-4 bg-blue-50 hover:bg-blue-100 rounded-t-lg transition-colors">
+                                        <div class="flex items-center space-x-2">
+                                            <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                                            </svg>
+                                            <span class="text-sm font-medium text-gray-900">Customer Details (Optional)</span>
+                                            <span class="text-xs text-gray-500">- For B2B / Fiscal Invoices</span>
+                                        </div>
+                                        <svg class="w-5 h-5 text-gray-500 transition-transform" :class="showBuyerData ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                        </svg>
+                                    </button>
+                                    
+                                    <div x-show="showBuyerData" x-collapse class="p-4 space-y-4 bg-white">
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Customer Name</label>
+                                                <input type="text" x-model="receiptForm.buyerData.buyerRegisterName" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="ABC Company Ltd">
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Trading Name</label>
+                                                <input type="text" x-model="receiptForm.buyerData.buyerTradeName" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="ABC Store">
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">VAT Number</label>
+                                                <input type="text" x-model="receiptForm.buyerData.vatNumber" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="12345678" maxlength="8">
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">TIN</label>
+                                                <input type="text" x-model="receiptForm.buyerData.buyerTIN" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="1234567890" maxlength="10">
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="border-t border-gray-200 pt-4">
+                                            <h4 class="text-sm font-medium text-gray-700 mb-3">Contact Information</h4>
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                                                    <input type="tel" x-model="receiptForm.buyerData.buyerContacts.phoneNo" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="+263712345678">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                                                    <input type="email" x-model="receiptForm.buyerData.buyerContacts.email" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="customer@example.com">
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="border-t border-gray-200 pt-4">
+                                            <h4 class="text-sm font-medium text-gray-700 mb-3">Address</h4>
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">House/Building No</label>
+                                                    <input type="text" x-model="receiptForm.buyerData.buyerAddress.houseNo" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="123">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Street</label>
+                                                    <input type="text" x-model="receiptForm.buyerData.buyerAddress.street" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="Main Street">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">District</label>
+                                                    <input type="text" x-model="receiptForm.buyerData.buyerAddress.district" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="CBD">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">City</label>
+                                                    <input type="text" x-model="receiptForm.buyerData.buyerAddress.city" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="Harare">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Province</label>
+                                                    <input type="text" x-model="receiptForm.buyerData.buyerAddress.province" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="Harare">
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                                            <div class="flex items-start space-x-2">
+                                                <svg class="w-5 h-5 text-blue-600 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+                                                </svg>
+                                                <div class="text-sm text-blue-800">
+                                                    <p class="font-medium">Customer details are optional</p>
+                                                    <p class="text-xs mt-1">Fill in customer information for B2B transactions or when issuing Fiscal Invoices. Leave empty for simple retail receipts.</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- Receipt Lines -->
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-2">Receipt Lines</label>
@@ -927,8 +1016,27 @@
                     ],
                     paymentMethod: 'Cash',
                     taxCode: 'A',
-                    taxPercent: 15
+                    taxPercent: 15,
+                    buyerData: {
+                        buyerRegisterName: '',
+                        buyerTradeName: '',
+                        vatNumber: '',
+                        buyerTIN: '',
+                        buyerContacts: {
+                            phoneNo: '',
+                            email: ''
+                        },
+                        buyerAddress: {
+                            province: '',
+                            city: '',
+                            street: '',
+                            houseNo: '',
+                            district: ''
+                        }
+                    }
                 },
+                
+                showBuyerData: false,
 
                 submitFilePayload: '',
                 submitFileResponse: null,
@@ -1482,6 +1590,40 @@
                             receiptTotal: total,
                             receiptPrintForm: 'Receipt48'
                         };
+                        
+                        // Add buyer data if any field is filled
+                        const buyerData = this.receiptForm.buyerData;
+                        const hasBuyerData = buyerData.buyerRegisterName || buyerData.buyerTradeName || 
+                                           buyerData.vatNumber || buyerData.buyerTIN ||
+                                           buyerData.buyerContacts.phoneNo || buyerData.buyerContacts.email ||
+                                           buyerData.buyerAddress.houseNo || buyerData.buyerAddress.street ||
+                                           buyerData.buyerAddress.city || buyerData.buyerAddress.province;
+                        
+                        if (hasBuyerData) {
+                            payload.buyerData = {
+                                ...(buyerData.buyerRegisterName && { buyerRegisterName: buyerData.buyerRegisterName }),
+                                ...(buyerData.buyerTradeName && { buyerTradeName: buyerData.buyerTradeName }),
+                                ...(buyerData.vatNumber && { vatNumber: buyerData.vatNumber }),
+                                ...(buyerData.buyerTIN && { buyerTIN: buyerData.buyerTIN }),
+                                ...((buyerData.buyerContacts.phoneNo || buyerData.buyerContacts.email) && {
+                                    buyerContacts: {
+                                        ...(buyerData.buyerContacts.phoneNo && { phoneNo: buyerData.buyerContacts.phoneNo }),
+                                        ...(buyerData.buyerContacts.email && { email: buyerData.buyerContacts.email })
+                                    }
+                                }),
+                                ...((buyerData.buyerAddress.houseNo || buyerData.buyerAddress.street || 
+                                    buyerData.buyerAddress.city || buyerData.buyerAddress.province || 
+                                    buyerData.buyerAddress.district) && {
+                                    buyerAddress: {
+                                        ...(buyerData.buyerAddress.province && { province: buyerData.buyerAddress.province }),
+                                        ...(buyerData.buyerAddress.city && { city: buyerData.buyerAddress.city }),
+                                        ...(buyerData.buyerAddress.street && { street: buyerData.buyerAddress.street }),
+                                        ...(buyerData.buyerAddress.houseNo && { houseNo: buyerData.buyerAddress.houseNo }),
+                                        ...(buyerData.buyerAddress.district && { district: buyerData.buyerAddress.district })
+                                    }
+                                })
+                            };
+                        }
                         
                         const res = await fetch('/zimra/submit-receipt', {
                             method: 'POST',

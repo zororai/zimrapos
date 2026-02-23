@@ -133,6 +133,23 @@ The ZIMRA Fiscal Device Management System (FDMS) integration provides a complete
       "paymentAmount": 230.00
     }
   ],
+  "buyerData": {
+    "buyerRegisterName": "ABC Company Ltd",
+    "buyerTradeName": "ABC Store",
+    "vatNumber": "12345678",
+    "buyerTIN": "1234567890",
+    "buyerContacts": {
+      "phoneNo": "+263712345678",
+      "email": "customer@example.com"
+    },
+    "buyerAddress": {
+      "province": "Harare",
+      "city": "Harare",
+      "street": "Main Street",
+      "houseNo": "123",
+      "district": "CBD"
+    }
+  },
   "receiptTotal": 230.00,
   "receiptDeviceSignature": {
     "hash": "base64_encoded_hash",
@@ -140,6 +157,8 @@ The ZIMRA Fiscal Device Management System (FDMS) integration provides a complete
   }
 }
 ```
+
+**Note**: `buyerData` is optional and typically used for FiscalInvoice receipts where customer details are required.
 
 ---
 
@@ -450,6 +469,7 @@ CREATE TABLE receipts (
     receipt_lines JSON, -- Array of line items
     receipt_taxes JSON, -- Array of tax breakdowns
     receipt_payments JSON, -- Array of payment methods
+    buyer_data JSON, -- Customer information (optional)
     receipt_total DECIMAL(15,2),
     receipt_device_signature JSON, -- {hash, signature}
     

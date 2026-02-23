@@ -224,6 +224,67 @@
             </div>
         </div>
         
+        @if($receipt->buyer_data)
+        <div class="info-section" style="background: #f0f8ff; padding: 10px; border-radius: 5px;">
+            <h4 style="font-size: 12px; margin-bottom: 8px; color: #1976d2;">CUSTOMER DETAILS</h4>
+            @if(isset($receipt->buyer_data['buyerRegisterName']))
+            <div class="info-row">
+                <span class="info-label">Name:</span>
+                <span class="info-value">{{ $receipt->buyer_data['buyerRegisterName'] }}</span>
+            </div>
+            @endif
+            @if(isset($receipt->buyer_data['buyerTradeName']))
+            <div class="info-row">
+                <span class="info-label">Trading Name:</span>
+                <span class="info-value">{{ $receipt->buyer_data['buyerTradeName'] }}</span>
+            </div>
+            @endif
+            @if(isset($receipt->buyer_data['vatNumber']))
+            <div class="info-row">
+                <span class="info-label">VAT Number:</span>
+                <span class="info-value">{{ $receipt->buyer_data['vatNumber'] }}</span>
+            </div>
+            @endif
+            @if(isset($receipt->buyer_data['buyerTIN']))
+            <div class="info-row">
+                <span class="info-label">TIN:</span>
+                <span class="info-value">{{ $receipt->buyer_data['buyerTIN'] }}</span>
+            </div>
+            @endif
+            @if(isset($receipt->buyer_data['buyerContacts']))
+                @if(isset($receipt->buyer_data['buyerContacts']['phoneNo']))
+                <div class="info-row">
+                    <span class="info-label">Phone:</span>
+                    <span class="info-value">{{ $receipt->buyer_data['buyerContacts']['phoneNo'] }}</span>
+                </div>
+                @endif
+                @if(isset($receipt->buyer_data['buyerContacts']['email']))
+                <div class="info-row">
+                    <span class="info-label">Email:</span>
+                    <span class="info-value">{{ $receipt->buyer_data['buyerContacts']['email'] }}</span>
+                </div>
+                @endif
+            @endif
+            @if(isset($receipt->buyer_data['buyerAddress']))
+                @php
+                    $address = [];
+                    if(isset($receipt->buyer_data['buyerAddress']['houseNo'])) $address[] = $receipt->buyer_data['buyerAddress']['houseNo'];
+                    if(isset($receipt->buyer_data['buyerAddress']['street'])) $address[] = $receipt->buyer_data['buyerAddress']['street'];
+                    if(isset($receipt->buyer_data['buyerAddress']['district'])) $address[] = $receipt->buyer_data['buyerAddress']['district'];
+                    if(isset($receipt->buyer_data['buyerAddress']['city'])) $address[] = $receipt->buyer_data['buyerAddress']['city'];
+                    if(isset($receipt->buyer_data['buyerAddress']['province'])) $address[] = $receipt->buyer_data['buyerAddress']['province'];
+                    $fullAddress = implode(', ', array_filter($address));
+                @endphp
+                @if($fullAddress)
+                <div class="info-row">
+                    <span class="info-label">Address:</span>
+                    <span class="info-value">{{ $fullAddress }}</span>
+                </div>
+                @endif
+            @endif
+        </div>
+        @endif
+        
         <table class="items-table">
             <thead>
                 <tr>
@@ -277,32 +338,6 @@
                 <span class="info-label">Payment Method:</span>
                 <span class="info-value">{{ $receipt->payment_method }}</span>
             </div>
-        </div>
-        
-        <div class="zimra-section">
-            <h4>ZIMRA Fiscal Data</h4>
-            @if($receipt->verification_code)
-            <div class="info-row">
-                <span class="info-label">Verification Code:</span>
-                <span class="info-value">{{ $receipt->verification_code }}</span>
-            </div>
-            @endif
-            @if($receipt->receipt_hash)
-            <div class="info-row">
-                <span class="info-label">Receipt Hash:</span>
-            </div>
-            <div class="signature-box">{{ $receipt->receipt_hash }}</div>
-            @endif
-            @if($receipt->receipt_signature)
-            <div class="info-row">
-                <span class="info-label">Server Signature:</span>
-            </div>
-            <div class="signature-box">{{ $receipt->receipt_signature['signature'] ?? '' }}</div>
-            <div class="info-row" style="margin-top: 5px;">
-                <span class="info-label">Certificate:</span>
-                <span class="info-value">{{ $receipt->receipt_signature['certificateThumbprint'] ?? '' }}</span>
-            </div>
-            @endif
         </div>
         
         <div class="qr-code-section" style="text-align: center; margin: 20px 0;">
