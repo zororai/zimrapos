@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\FiscalDay;
 use App\Models\Receipt;
 use App\Models\ZimraConfig;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -1536,35 +1537,40 @@ class ZimraDeviceService
 
         /*
         |--------------------------------------------------------------------------
-        | 4️⃣ Get Correct Receipt Counter from Database (using FDMS fiscal day)
+        | 6️⃣ Calculate Receipt Counters (with DB transaction and row locking)
+        |--------------------------------------------------------------------------
+        | CRITICAL: Use lockForUpdate() to prevent race conditions and duplicates
+        | Use max() instead of orderBy()->first() for better performance
         |--------------------------------------------------------------------------
         */
-        $lastReceipt = Receipt::where('device_id', $deviceId)
-            ->where('fiscal_day_no', $fiscalDayNo)
-            ->orderBy('receipt_counter', 'desc')
-            ->first();
-        
-        $lastReceiptCounter = $lastReceipt ? (int) $lastReceipt->receipt_counter : 0;
-        $nextReceiptCounter = $lastReceiptCounter + 1;
+        DB::transaction(function () use ($deviceId, $fiscalDayNo, &$receiptData) {
+            // Lock rows and get max counter for this fiscal day
+            $maxReceiptCounter = Receipt::where('device_id', $deviceId)
+                ->where('fiscal_day_no', $fiscalDayNo)
+                ->lockForUpdate()
+                ->max('receipt_counter');
+            
+            $nextReceiptCounter = ($maxReceiptCounter ?? 0) + 1;
 
-        // Get global counter (across all fiscal days for this device)
-        $lastGlobalReceipt = Receipt::where('device_id', $deviceId)
-            ->orderBy('receipt_global_no', 'desc')
-            ->first();
-        $lastGlobalNo = $lastGlobalReceipt ? (int) $lastGlobalReceipt->receipt_global_no : 0;
-        $nextGlobalNo = $lastGlobalNo + 1;
+            // Lock rows and get max global counter across all fiscal days
+            $maxGlobalNo = Receipt::where('device_id', $deviceId)
+                ->lockForUpdate()
+                ->max('receipt_global_no');
+            
+            $nextGlobalNo = ($maxGlobalNo ?? 0) + 1;
 
-        Log::info('ZIMRA SubmitReceipt - Counter Calculation', [
-            'last_receipt_counter' => $lastReceiptCounter,
-            'next_receipt_counter' => $nextReceiptCounter,
-            'last_global_no' => $lastGlobalNo,
-            'next_global_no' => $nextGlobalNo,
-            'fdms_fiscal_day_no' => $fiscalDayNo,
-        ]);
+            Log::info('ZIMRA SubmitReceipt - Counter Calculation (locked)', [
+                'max_receipt_counter' => $maxReceiptCounter ?? 0,
+                'next_receipt_counter' => $nextReceiptCounter,
+                'max_global_no' => $maxGlobalNo ?? 0,
+                'next_global_no' => $nextGlobalNo,
+                'fdms_fiscal_day_no' => $fiscalDayNo,
+            ]);
 
-        // Override counters with calculated values
-        $receiptData['receiptCounter'] = $nextReceiptCounter;
-        $receiptData['receiptGlobalNo'] = $nextGlobalNo;
+            // Override counters with calculated values
+            $receiptData['receiptCounter'] = $nextReceiptCounter;
+            $receiptData['receiptGlobalNo'] = $nextGlobalNo;
+        });
 
         /*
         |--------------------------------------------------------------------------
