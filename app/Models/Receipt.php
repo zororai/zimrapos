@@ -3,9 +3,12 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Receipt extends Model
 {
+    use SoftDeletes;
+
     protected $fillable = [
         'device_id',
         'invoice_no',
@@ -53,4 +56,38 @@ class Receipt extends Model
         'has_red_errors' => 'boolean',
         'has_gray_errors' => 'boolean',
     ];
+
+    protected static function booted(): void
+    {
+        static::updating(function (Receipt $receipt) {
+            $fiscalDay = FiscalDay::where('device_id', $receipt->device_id)
+                ->where('fiscal_day_no', $receipt->fiscal_day_no)
+                ->first();
+
+            if ($fiscalDay && $fiscalDay->status === 'closed') {
+                throw new \Exception(
+                    "Cannot modify receipt #{$receipt->receipt_global_no}: " .
+                    "Fiscal day {$receipt->fiscal_day_no} is already closed"
+                );
+            }
+        });
+
+        static::deleting(function (Receipt $receipt) {
+            $fiscalDay = FiscalDay::where('device_id', $receipt->device_id)
+                ->where('fiscal_day_no', $receipt->fiscal_day_no)
+                ->first();
+
+            if ($fiscalDay && $fiscalDay->status === 'closed') {
+                throw new \Exception(
+                    "Cannot delete receipt #{$receipt->receipt_global_no}: " .
+                    "Fiscal day {$receipt->fiscal_day_no} is already closed"
+                );
+            }
+        });
+    }
+
+    public function fiscalDay()
+    {
+        return $this->belongsTo(FiscalDay::class, 'fiscal_day_no', 'fiscal_day_no');
+    }
 }
