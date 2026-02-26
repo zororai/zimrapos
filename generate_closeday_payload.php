@@ -10,10 +10,13 @@ use App\Models\Receipt;
 use App\Models\ZimraConfig;
 use Illuminate\Support\Facades\Storage;
 
-echo "=== Generating CloseDay Payload for Postman ===\n\n";
+echo "=== Generating CloseDay Payload for Postman (ZIMRA v7.2) ===\n\n";
 
 $deviceId = 32558;
-$fiscalDayNo = 11;
+$fiscalDayNo = 12;
+
+echo "ZIMRA Fiscal Device Gateway API v7.2\n";
+echo "Generating v7.2 compliant CloseDay payload\n\n";
 
 // Get fiscal day
 $fiscalDay = FiscalDay::where('device_id', $deviceId)
@@ -48,7 +51,7 @@ $receiptCounter = $lastReceipt ? $lastReceipt->receipt_counter : 0;
 
 echo "Receipt Counter: {$receiptCounter}\n\n";
 
-// Calculate fiscalDayCounters
+// Calculate fiscalCounters (v7.2 spec)
 $counters = [];
 $totalReceiptValue = 0;
 
@@ -64,14 +67,15 @@ foreach ($receipts as $receipt) {
         $taxID = (int) ($tax['taxID'] ?? 1);
         $salesAmountWithTax = (float) ($tax['salesAmountWithTax'] ?? 0);
         
-        $taxKey = "SaleByTax_{$taxID}_{$taxPercent}";
+        // v7.2: Group by Type_Currency_TaxID_TaxPercent
+        $taxKey = "SaleByTax_{$currency}_{$taxID}_" . number_format($taxPercent, 2, '_', '');
         if (!isset($counters[$taxKey])) {
             $counters[$taxKey] = [
                 'fiscalCounterType' => 'SaleByTax',
                 'fiscalCounterCurrency' => $currency,
                 'fiscalCounterTaxPercent' => $taxPercent,
                 'fiscalCounterTaxID' => $taxID,
-                'fiscalCounterValue' => 0,
+                'fiscalCounterValue' => 0.0,
             ];
         }
         $counters[$taxKey]['fiscalCounterValue'] += $salesAmountWithTax;
@@ -89,56 +93,78 @@ $filteredCounters = array_filter($counters, function ($c) {
     return $c['fiscalCounterValue'] > 0;
 });
 
-$fiscalDayCounters = array_values($filteredCounters);
+// v7.2 SPEC: Field name is 'fiscalCounters' NOT 'fiscalDayCounters'
+$fiscalCounters = array_values($filteredCounters);
 
-echo "Fiscal Day Counters:\n";
-foreach ($fiscalDayCounters as $counter) {
+echo "Fiscal Counters (v7.2):\n";
+foreach ($fiscalCounters as $counter) {
     echo "  - {$counter['fiscalCounterType']}: Tax {$counter['fiscalCounterTaxID']} ({$counter['fiscalCounterTaxPercent']}%) = {$counter['fiscalCounterCurrency']} {$counter['fiscalCounterValue']}\n";
 }
 echo "\n";
 
-// Build payload
+// Build v7.2 compliant payload
+// CRITICAL: fiscalDayClosed is the CLOSING timestamp, not opening
+$fiscalDayClosed = date('Y-m-d\TH:i:s');
+
 $payload = [
+    'deviceID' => $deviceId,
     'fiscalDayNo' => $fiscalDay->fiscal_day_no,
-    'fiscalDayDate' => $fiscalDay->opened_at->format('Y-m-d\TH:i:s'),
+    'fiscalCounters' => $fiscalCounters,
     'receiptCounter' => $receiptCounter,
-    'fiscalDayCounters' => $fiscalDayCounters,
+    'fiscalDayClosed' => $fiscalDayClosed,
 ];
 
 echo "=== PAYLOAD (before signature) ===\n";
 echo json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n\n";
 
-// Build canonical string for signature
+// Build canonical string for signature (v7.2 spec section 13.3)
 function buildCloseDayCanonicalString($payload, $deviceId)
 {
-    $parts = [
-        $deviceId,
-        $payload['fiscalDayNo'],
-        $payload['fiscalDayDate'],
-        $payload['receiptCounter'],
-    ];
+    // v7.2 Format: deviceID || fiscalDayNo || fiscalDayClosed || receiptCounter || fiscalCounters
+    $parts = [];
     
-    // Sort counters by type, taxID, taxPercent for consistency
-    $counters = $payload['fiscalDayCounters'];
+    // 1. deviceID
+    $parts[] = (string) $deviceId;
+    
+    // 2. fiscalDayNo
+    $parts[] = (string) $payload['fiscalDayNo'];
+    
+    // 3. fiscalDayClosed (ISO datetime)
+    $parts[] = $payload['fiscalDayClosed'];
+    
+    // 4. receiptCounter
+    $parts[] = (string) $payload['receiptCounter'];
+    
+    // 5. fiscalCounters - concatenated string
+    $counters = $payload['fiscalCounters'];
+    
+    // Sort counters per FDMS spec
     usort($counters, function ($a, $b) {
-        if ($a['fiscalCounterType'] !== $b['fiscalCounterType']) {
-            return strcmp($a['fiscalCounterType'], $b['fiscalCounterType']);
-        }
-        if ($a['fiscalCounterTaxID'] !== $b['fiscalCounterTaxID']) {
-            return $a['fiscalCounterTaxID'] <=> $b['fiscalCounterTaxID'];
-        }
-        return $a['fiscalCounterTaxPercent'] <=> $b['fiscalCounterTaxPercent'];
+        $typeOrder = ['SaleByTax' => 0, 'SaleTaxByTax' => 1, 'CreditNoteByTax' => 2];
+        $typeCompare = ($typeOrder[$a['fiscalCounterType']] ?? 99) <=> ($typeOrder[$b['fiscalCounterType']] ?? 99);
+        if ($typeCompare !== 0) return $typeCompare;
+        
+        $currencyCompare = strcmp($a['fiscalCounterCurrency'], $b['fiscalCounterCurrency']);
+        if ($currencyCompare !== 0) return $currencyCompare;
+        
+        return ($a['fiscalCounterTaxID'] ?? 0) <=> ($b['fiscalCounterTaxID'] ?? 0);
     });
     
+    $counterStrings = [];
     foreach ($counters as $counter) {
-        $parts[] = $counter['fiscalCounterType'];
-        $parts[] = $counter['fiscalCounterCurrency'];
-        $parts[] = number_format($counter['fiscalCounterTaxPercent'], 2, '.', '');
-        $parts[] = $counter['fiscalCounterTaxID'];
-        $parts[] = number_format($counter['fiscalCounterValue'], 2, '.', '');
+        $counterParts = [];
+        $counterParts[] = strtoupper($counter['fiscalCounterType']);
+        $counterParts[] = strtoupper($counter['fiscalCounterCurrency']);
+        $counterParts[] = number_format($counter['fiscalCounterTaxPercent'], 2, '.', '');
+        $valueInCents = (int) round($counter['fiscalCounterValue'] * 100);
+        $counterParts[] = (string) $valueInCents;
+        $counterStrings[] = implode('', $counterParts);
     }
     
-    return implode('|', $parts);
+    $parts[] = implode('', $counterStrings);
+    
+    // Concatenate without separators
+    return implode('', $parts);
 }
 
 $canonicalString = buildCloseDayCanonicalString($payload, $deviceId);
@@ -177,11 +203,21 @@ if (!$success) {
 
 $base64Signature = base64_encode($signature);
 
+// v7.2 SPEC: Hash the canonical string for the hash field
+$hash = hash('sha256', $canonicalString, true);
+$hashBase64 = base64_encode($hash);
+
+echo "=== HASH (Base64 SHA256) ===\n";
+echo $hashBase64 . "\n\n";
+
 echo "=== SIGNATURE (Base64) ===\n";
 echo $base64Signature . "\n\n";
 
-// Add signature to payload
-$payload['fiscalDayDeviceSignature'] = $base64Signature;
+// v7.2 SPEC: Signature must be an object with hash and signature
+$payload['fiscalDayDeviceSignature'] = [
+    'hash' => $hashBase64,
+    'signature' => $base64Signature,
+];
 
 echo "=== FINAL PAYLOAD (with signature) ===\n";
 $finalJson = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);

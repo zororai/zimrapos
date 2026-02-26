@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use App\Models\DeviceState;
 
 class ZimraDeviceService
 {
@@ -510,16 +511,19 @@ class ZimraDeviceService
     */
     public function getStatus(int $deviceId = null)
     {
-        $zimraConfig = ZimraConfig::getActive();
-
-        if (!$zimraConfig) {
-            throw new \Exception('No active ZIMRA configuration found.');
+        // CRITICAL: device_id MUST be provided
+        if (!$deviceId) {
+            throw new \Exception(
+                'CRITICAL: device_id is required for getStatus(). ' .
+                'Device ID must be provided by caller.'
+            );
         }
 
-        $deviceId = $deviceId ?? $zimraConfig->device_id;
+        // Load config for THIS specific device
+        $zimraConfig = ZimraConfig::where('device_id', $deviceId)->first();
 
-        if (!$deviceId) {
-            throw new \Exception('No device ID provided or found in configuration.');
+        if (!$zimraConfig) {
+            throw new \Exception("No ZIMRA configuration found for device {$deviceId}.");
         }
 
         $baseUrl = $zimraConfig->base_url;
@@ -547,18 +551,21 @@ class ZimraDeviceService
     | Open Fiscal Day (mTLS) - With Database Tracking
     |--------------------------------------------------------------------------
     */
-    public function openDay(int $fiscalDayNo = null)
+    public function openDay(int $fiscalDayNo = null, int $deviceId = null)
     {
-        $zimraConfig = ZimraConfig::getActive();
-
-        if (!$zimraConfig) {
-            throw new \Exception('No active ZIMRA configuration found.');
+        // CRITICAL: device_id MUST be provided
+        if (!$deviceId) {
+            throw new \Exception(
+                'CRITICAL: device_id is required for openDay(). ' .
+                'Device ID must be provided by ResolveCompanyDevice middleware.'
+            );
         }
 
-        $deviceId = $zimraConfig->device_id;
+        // Load config for THIS specific device
+        $zimraConfig = ZimraConfig::where('device_id', $deviceId)->first();
 
-        if (!$deviceId) {
-            throw new \Exception('No device ID found in configuration.');
+        if (!$zimraConfig) {
+            throw new \Exception("No ZIMRA configuration found for device {$deviceId}.");
         }
 
         // Check if there's already an open fiscal day
@@ -746,18 +753,21 @@ class ZimraDeviceService
     | Close Fiscal Day (mTLS) - With Database Tracking
     |--------------------------------------------------------------------------
     */
-    public function closeDay(array $payload = null)
+    public function closeDay(array $payload = null, int $deviceId = null)
     {
-        $zimraConfig = ZimraConfig::getActive();
-
-        if (!$zimraConfig) {
-            throw new \Exception('No active ZIMRA configuration found.');
+        // CRITICAL: device_id MUST be provided
+        if (!$deviceId) {
+            throw new \Exception(
+                'CRITICAL: device_id is required for closeDay(). ' .
+                'Device ID must be provided by ResolveCompanyDevice middleware.'
+            );
         }
 
-        $deviceId = $zimraConfig->device_id;
+        // Load config for THIS specific device
+        $zimraConfig = ZimraConfig::where('device_id', $deviceId)->first();
 
-        if (!$deviceId) {
-            throw new \Exception('No device ID found in configuration.');
+        if (!$zimraConfig) {
+            throw new \Exception("No ZIMRA configuration found for device {$deviceId}.");
         }
 
         // Get current open fiscal day OR last fiscal day that needs retry
@@ -765,7 +775,7 @@ class ZimraDeviceService
         
         // If no open day, check ZIMRA status
         if (!$fiscalDay) {
-            $zimraStatus = $this->getStatus();
+            $zimraStatus = $this->getStatus($deviceId);
             $status = $zimraStatus['fiscalDayStatus'] ?? null;
             
             // FiscalDayCloseInitiated = close is in progress, do NOT retry
@@ -833,15 +843,32 @@ class ZimraDeviceService
         }
 
         // DEBUG: Log payload before signing
-        Log::debug('ZIMRA CloseDay - Payload before signing', [
+        Log::debug('ZIMRA CloseDay v7.2 - Payload before signing', [
             'payload' => $payload,
         ]);
 
-        // Build canonical string for signature (per FDMS spec 13.3.1)
-        $canonicalString = $this->buildCloseDayCanonicalString($payload, $deviceId);
+        // Extract fiscalDayDate for canonical string (YYYY-MM-DD when day was opened)
+        $fiscalDayDate = $payload['_fiscalDayDate'];
+        unset($payload['_fiscalDayDate']); // Remove internal field before signing
+
+        // Build canonical string for signature (per FDMS spec 13.3)
+        $canonicalString = $this->buildCloseDayCanonicalString($payload, $deviceId, $fiscalDayDate);
         
-        // Sign the canonical string - required by ZIMRA
+        // Sign the canonical string - required by ZIMRA v7.2
         $payload['fiscalDayDeviceSignature'] = $this->signCanonicalString($canonicalString);
+
+        // Validate payload before sending (v7.2 compliance check)
+        $validation = \App\Services\CloseDayValidator::validate($payload, $fiscalDay, $deviceId);
+        if (!$validation['valid']) {
+            Log::error('ZIMRA CloseDay v7.2 - Validation failed', [
+                'errors' => $validation['errors'],
+            ]);
+            return [
+                'error' => true,
+                'message' => 'CloseDay validation failed',
+                'validation_errors' => $validation['errors'],
+            ];
+        }
 
         // DEBUG: Log final payload being sent
         Log::debug('ZIMRA CloseDay - Final payload', [
@@ -901,7 +928,7 @@ class ZimraDeviceService
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
             sleep($pollDelaySeconds);
             
-            $statusResponse = $this->getStatus();
+            $statusResponse = $this->getStatus($deviceId);
             $currentStatus = $statusResponse['fiscalDayStatus'] ?? null;
             
             Log::info('ZIMRA CloseDay - Polling status', [
@@ -957,10 +984,17 @@ class ZimraDeviceService
 
     /*
     |--------------------------------------------------------------------------
-    | Build CloseDay Payload from Stored Receipts
+    | Build CloseDay Payload from Stored Receipts (v7.2 Compliant)
     |--------------------------------------------------------------------------
-    | Calculates fiscalDayCounters dynamically from receipts table.
-    | Validates totals match before returning payload.
+    | ZIMRA Fiscal Device Gateway API v7.2 Specification
+    | 
+    | Payload Structure:
+    | - deviceID: int (included in payload, not just URL)
+    | - fiscalDayNo: int
+    | - fiscalCounters: array (NOT fiscalDayCounters)
+    | - fiscalDayDeviceSignature: {hash, signature} object
+    | - receiptCounter: int (max receipt counter, NOT count)
+    | - fiscalDayClosed: ISO datetime string
     |--------------------------------------------------------------------------
     */
     private function buildCloseDayPayload(FiscalDay $fiscalDay, int $deviceId): array
@@ -971,7 +1005,7 @@ class ZimraDeviceService
             ->where('is_valid', true)
             ->get();
 
-        Log::info('CloseDay - Building payload from receipts', [
+        Log::info('CloseDay v7.2 - Building payload from receipts', [
             'fiscal_day_no' => $fiscalDay->fiscal_day_no,
             'receipt_count' => $receipts->count(),
         ]);
@@ -1023,26 +1057,47 @@ class ZimraDeviceService
 
         /*
         |--------------------------------------------------------------------------
-        | 1️⃣ Calculate receiptCounter (last receipt counter for this day)
+        | 1️⃣ Calculate receiptCounter (v7.2 SPEC: max receipt counter)
+        |--------------------------------------------------------------------------
+        | CRITICAL: receiptCounter MUST be the receiptCounter of the LAST receipt
+        | in the fiscal day, NOT the count of receipts.
+        | Use max(receipt_counter) from database.
         |--------------------------------------------------------------------------
         */
-        $lastReceipt = $receipts->sortByDesc('receipt_counter')->first();
-        $receiptCounter = $lastReceipt ? $lastReceipt->receipt_counter : 0;
+        $receiptCounter = Receipt::where('device_id', $deviceId)
+            ->where('fiscal_day_no', $fiscalDay->fiscal_day_no)
+            ->where('is_valid', true)
+            ->max('receipt_counter') ?? 0;
 
-        Log::debug('CloseDay - Receipt counter from last receipt', [
+        Log::debug('CloseDay v7.2 - Receipt counter (max)', [
             'receipt_counter' => $receiptCounter,
-            'last_receipt_id' => $lastReceipt?->id,
+            'receipt_count' => $receipts->count(),
         ]);
 
         /*
         |--------------------------------------------------------------------------
-        | 2️⃣ Calculate fiscalDayCounters from receipts
+        | 2️⃣ Calculate fiscalCounters from receipts (FDMS Reconciliation Logic)
         |--------------------------------------------------------------------------
-        | Group by: taxID, taxPercent, paymentMethod (moneyType)
+        | ZIMRA FDMS derives THREE counter types from submitted fiscal invoices:
+        | Per Section 5.4.4 - Valid FiscalCounterType enum values:
+        |
+        | A) SaleByTax - Group by: currency, taxID, taxPercent
+        |    Value: salesAmountWithTax from receiptTaxes
+        |
+        | B) SaleTaxByTax - Group by: currency, taxID, taxPercent
+        |    Value: taxAmount from receiptTaxes
+        |
+        | C) BalanceByMoneyType - Group by: currency, moneyType
+        |    Value: paymentAmount from receiptPayments
+        |
+        | CRITICAL: Use integer cents internally to avoid float drift
+        | Convert back to 2-decimal format only when building payload
+        |
+        | NOTE: SaleByMoneyType and SalesTotal are NOT valid enum values!
         |--------------------------------------------------------------------------
         */
         $counters = [];
-        $totalReceiptValue = 0;
+        $totalReceiptValueCents = 0;
 
         foreach ($receipts as $receipt) {
             $receiptTaxes = $receipt->receipt_taxes ?? [];
@@ -1050,95 +1105,216 @@ class ZimraDeviceService
             $receiptTotal = (float) $receipt->receipt_total;
             $currency = $receipt->receipt_currency ?? 'USD';
 
-            $totalReceiptValue += $receiptTotal;
+            // Convert to cents for integer-safe arithmetic
+            $receiptTotalCents = (int) round($receiptTotal * 100);
+            $totalReceiptValueCents += $receiptTotalCents;
 
-            // Process each tax group in the receipt
+            /*
+            |----------------------------------------------------------------------
+            | A) SaleByTax Counters
+            |----------------------------------------------------------------------
+            | Group by: currency, taxID, taxPercent
+            | Value: salesAmountWithTax
+            | 
+            | CRITICAL: Tax is determined by LINE ITEMS, not payment method.
+            | Do NOT include fiscalCounterMoneyType in SaleByTax.
+            |----------------------------------------------------------------------
+            */
             foreach ($receiptTaxes as $tax) {
-                $taxCode = $tax['taxCode'] ?? 'A';
                 $taxPercent = (float) ($tax['taxPercent'] ?? 0);
                 $taxID = (int) ($tax['taxID'] ?? 1);
                 $salesAmountWithTax = (float) ($tax['salesAmountWithTax'] ?? 0);
+                $salesAmountCents = (int) round($salesAmountWithTax * 100);
 
-                // SaleByTax counter (no moneyType per ZIMRA spec)
-                $taxKey = "SaleByTax_{$taxID}_{$taxPercent}";
+                if ($salesAmountCents <= 0) {
+                    continue; // Skip zero-value counters
+                }
+
+                // Create unique key: Type_Currency_TaxID_TaxPercent (NO moneyType)
+                $taxKey = "SaleByTax_{$currency}_{$taxID}_" . number_format($taxPercent, 2, '_', '');
+                
                 if (!isset($counters[$taxKey])) {
                     $counters[$taxKey] = [
                         'fiscalCounterType' => 'SaleByTax',
                         'fiscalCounterCurrency' => $currency,
                         'fiscalCounterTaxPercent' => $taxPercent,
                         'fiscalCounterTaxID' => $taxID,
-                        'fiscalCounterValue' => 0,
+                        'fiscalCounterValueCents' => 0,
                     ];
                 }
-                $counters[$taxKey]['fiscalCounterValue'] += $salesAmountWithTax;
+                $counters[$taxKey]['fiscalCounterValueCents'] += $salesAmountCents;
             }
 
-            // Note: Payment counters (SaleByMoneyType) are NOT part of FDMS CloseDay spec
-            // Only tax-based counters (SaleByTax, SaleTaxByTax, etc.) are valid
-            // Payments are tracked within receipts, not as separate fiscal counters
+            /*
+            |----------------------------------------------------------------------
+            | B) SaleTaxByTax Counters
+            |----------------------------------------------------------------------
+            | Group by: currency, taxID, taxPercent
+            | Value: taxAmount from receiptTaxes
+            |----------------------------------------------------------------------
+            */
+            foreach ($receiptTaxes as $tax) {
+                $taxPercent = (float) ($tax['taxPercent'] ?? 0);
+                $taxID = (int) ($tax['taxID'] ?? 1);
+                $taxAmount = (float) ($tax['taxAmount'] ?? 0);
+                $taxAmountCents = (int) round($taxAmount * 100);
+
+                if ($taxAmountCents <= 0) {
+                    continue; // Skip zero-value counters
+                }
+
+                // Create unique key: Type_Currency_TaxID_TaxPercent (NO moneyType)
+                $saleTaxKey = "SaleTaxByTax_{$currency}_{$taxID}_" . number_format($taxPercent, 2, '_', '');
+                
+                if (!isset($counters[$saleTaxKey])) {
+                    $counters[$saleTaxKey] = [
+                        'fiscalCounterType' => 'SaleTaxByTax',
+                        'fiscalCounterCurrency' => $currency,
+                        'fiscalCounterTaxPercent' => $taxPercent,
+                        'fiscalCounterTaxID' => $taxID,
+                        'fiscalCounterValueCents' => 0,
+                    ];
+                }
+                $counters[$saleTaxKey]['fiscalCounterValueCents'] += $taxAmountCents;
+            }
+
+            /*
+            |----------------------------------------------------------------------
+            | C) BalanceByMoneyType Counters
+            |----------------------------------------------------------------------
+            | Group by: currency, moneyType
+            | Value: paymentAmount from receiptPayments
+            | 
+            | Per ZIMRA spec Section 5.4.4: BalanceByMoneyType tracks payment balance
+            |----------------------------------------------------------------------
+            */
+            foreach ($receiptPayments as $payment) {
+                $moneyType = $payment['moneyTypeCode'] ?? 'Cash';
+                $paymentAmount = (float) ($payment['paymentAmount'] ?? 0);
+                $paymentAmountCents = (int) round($paymentAmount * 100);
+
+                if ($paymentAmountCents <= 0) {
+                    continue;
+                }
+
+                $balanceKey = "BalanceByMoneyType_{$currency}_{$moneyType}";
+                
+                if (!isset($counters[$balanceKey])) {
+                    $counters[$balanceKey] = [
+                        'fiscalCounterType' => 'BalanceByMoneyType',
+                        'fiscalCounterCurrency' => $currency,
+                        'fiscalCounterMoneyType' => $moneyType,
+                        'fiscalCounterValueCents' => 0,
+                    ];
+                }
+                $counters[$balanceKey]['fiscalCounterValueCents'] += $paymentAmountCents;
+            }
         }
 
-        // Round all counter values
+        // Convert cents back to decimal format for payload
         foreach ($counters as &$counter) {
-            $counter['fiscalCounterValue'] = round($counter['fiscalCounterValue'], 2);
+            $counter['fiscalCounterValue'] = round($counter['fiscalCounterValueCents'] / 100, 2);
+            unset($counter['fiscalCounterValueCents']); // Remove internal cents field
         }
         unset($counter);
 
-        // Filter out zero-value counters
+        // Filter out zero-value counters (v7.2 requirement)
         $filteredCounters = array_filter($counters, function ($c) {
             return $c['fiscalCounterValue'] > 0;
         });
 
-        $fiscalDayCounters = array_values($filteredCounters);
+        // v7.2 SPEC: Field name is 'fiscalDayCounters' per Section 13.3.1
+        $fiscalCounters = array_values($filteredCounters);
 
         /*
         |--------------------------------------------------------------------------
-        | 3️⃣ Validate Totals
+        | 3️⃣ Validate Totals (FDMS Reconciliation Check)
         |--------------------------------------------------------------------------
         */
         $totalSalesByTax = 0;
+        $totalSaleTaxByTax = 0;
+        $totalBalanceByMoneyType = 0;
 
-        foreach ($fiscalDayCounters as $counter) {
+        foreach ($fiscalCounters as $counter) {
             if ($counter['fiscalCounterType'] === 'SaleByTax') {
                 $totalSalesByTax += $counter['fiscalCounterValue'];
+            } elseif ($counter['fiscalCounterType'] === 'SaleTaxByTax') {
+                $totalSaleTaxByTax += $counter['fiscalCounterValue'];
+            } elseif ($counter['fiscalCounterType'] === 'BalanceByMoneyType') {
+                $totalBalanceByMoneyType += $counter['fiscalCounterValue'];
             }
         }
 
         $totalSalesByTax = round($totalSalesByTax, 2);
-        $totalReceiptValue = round($totalReceiptValue, 2);
+        $totalSaleTaxByTax = round($totalSaleTaxByTax, 2);
+        $totalBalanceByMoneyType = round($totalBalanceByMoneyType, 2);
+        $totalReceiptValue = round($totalReceiptValueCents / 100, 2);
 
-        Log::info('CloseDay - Payload validation', [
+        Log::info('CloseDay v7.2 - Counter aggregation summary', [
             'receipt_counter' => $receiptCounter,
             'total_receipt_value' => $totalReceiptValue,
             'total_sales_by_tax' => $totalSalesByTax,
-            'counter_count' => count($fiscalDayCounters),
+            'total_sale_tax_by_tax' => $totalSaleTaxByTax,
+            'total_balance_by_money_type' => $totalBalanceByMoneyType,
+            'counter_count' => count($fiscalCounters),
         ]);
 
         // Log each counter for debugging
-        foreach ($fiscalDayCounters as $index => $counter) {
-            Log::debug("CloseDay - Counter #{$index}", [
+        foreach ($fiscalCounters as $index => $counter) {
+            $logData = [
                 'type' => $counter['fiscalCounterType'],
+                'currency' => $counter['fiscalCounterCurrency'],
                 'value' => $counter['fiscalCounterValue'],
-                'taxID' => $counter['fiscalCounterTaxID'] ?? null,
-                'taxPercent' => $counter['fiscalCounterTaxPercent'] ?? null,
-            ]);
+            ];
+            
+            if (isset($counter['fiscalCounterTaxID'])) {
+                $logData['taxID'] = $counter['fiscalCounterTaxID'];
+            }
+            if (isset($counter['fiscalCounterTaxPercent'])) {
+                $logData['taxPercent'] = $counter['fiscalCounterTaxPercent'];
+            }
+            if (isset($counter['fiscalCounterMoneyType'])) {
+                $logData['moneyType'] = $counter['fiscalCounterMoneyType'];
+            }
+            
+            Log::debug("CloseDay v7.2 - Counter #{$index}", $logData);
         }
 
-        // Validate: SalesByTax should equal total receipt value
-        if (abs($totalSalesByTax - $totalReceiptValue) > 0.01) {
-            Log::error('CloseDay - SalesByTax mismatch', [
+        // Validate: Counter types should match expectations
+        $tolerance = 0.01;
+        
+        // Validate SaleByTax matches total
+        if (abs($totalSalesByTax - $totalReceiptValue) > $tolerance) {
+            Log::error('CloseDay v7.2 - SaleByTax mismatch', [
                 'total_sales_by_tax' => $totalSalesByTax,
                 'total_receipt_value' => $totalReceiptValue,
                 'difference' => $totalSalesByTax - $totalReceiptValue,
             ]);
             throw new \Exception(
-                "CloseDay validation failed: SalesByTax ({$totalSalesByTax}) != totalReceiptValue ({$totalReceiptValue})"
+                "CloseDay validation failed: SaleByTax ({$totalSalesByTax}) != totalReceiptValue ({$totalReceiptValue})"
             );
         }
 
-        // Validate: receiptCounter should match receipt count or be > 0
+        // Validate BalanceByMoneyType matches total
+        if (abs($totalBalanceByMoneyType - $totalReceiptValue) > $tolerance) {
+            Log::error('CloseDay v7.2 - BalanceByMoneyType mismatch', [
+                'total_balance_by_money_type' => $totalBalanceByMoneyType,
+                'total_receipt_value' => $totalReceiptValue,
+                'difference' => $totalBalanceByMoneyType - $totalReceiptValue,
+            ]);
+            throw new \Exception(
+                "CloseDay validation failed: BalanceByMoneyType ({$totalBalanceByMoneyType}) != totalReceiptValue ({$totalReceiptValue})"
+            );
+        }
+        
+        // SaleTaxByTax validation: should equal total tax amount (may be 0 for exempt)
+        Log::info('CloseDay v7.2 - SaleTaxByTax total', [
+            'total_sale_tax_by_tax' => $totalSaleTaxByTax,
+        ]);
+
+        // Validate: receiptCounter must be > 0 if receipts exist
         if ($receiptCounter <= 0 && $receipts->isNotEmpty()) {
-            Log::error('CloseDay - Invalid receipt counter', [
+            Log::error('CloseDay v7.2 - Invalid receipt counter', [
                 'receipt_counter' => $receiptCounter,
                 'receipt_count' => $receipts->count(),
             ]);
@@ -1147,32 +1323,67 @@ class ZimraDeviceService
             );
         }
 
-        // Add fiscalDayDate (required for signature per FDMS spec 13.3.1)
-        $fiscalDayDate = $fiscalDay->opened_at->format('Y-m-d');
+        /*
+        |--------------------------------------------------------------------------
+        | 4️⃣ Build v7.2 Compliant Payload Structure
+        |--------------------------------------------------------------------------
+        | CRITICAL FIELD NAMES (v7.2 SPEC Section 13.3.1):
+        | - deviceID (int) - MUST be in payload
+        | - fiscalDayNo (int)
+        | - fiscalDayCounters (array) - Per API spec
+        | - receiptCounter (int) - max receipt counter
+        | - fiscalDayClosed (string) - ISO datetime, NOT fiscalDayDate
+        |--------------------------------------------------------------------------
+        */
+        
+        // v7.2 SPEC: fiscalDayClosed is the closing timestamp (ISO format)
+        // Use current time as the closing time
+        $fiscalDayClosed = now()->format('Y-m-d\TH:i:s');
 
         $payload = [
+            'deviceID' => $deviceId,
             'fiscalDayNo' => $fiscalDay->fiscal_day_no,
-            'fiscalDayDate' => $fiscalDayDate,
-            'fiscalDayCounters' => $fiscalDayCounters,
+            'fiscalDayCounters' => $fiscalCounters,
             'receiptCounter' => $receiptCounter,
+            'fiscalDayClosed' => $fiscalDayClosed,
         ];
 
-        Log::info('CloseDay - Final payload built', [
+        Log::info('CloseDay v7.2 - Final payload built (without signature)', [
+            'device_id' => $payload['deviceID'],
             'fiscal_day_no' => $payload['fiscalDayNo'],
-            'fiscal_day_date' => $payload['fiscalDayDate'],
+            'fiscal_day_closed' => $payload['fiscalDayClosed'],
             'receipt_counter' => $payload['receiptCounter'],
             'counter_count' => count($payload['fiscalDayCounters']),
         ]);
+
+        // Store fiscalDayDate for canonical string (YYYY-MM-DD when day was opened)
+        $fiscalDayDate = $fiscalDay->opened_at->format('Y-m-d');
+        $payload['_fiscalDayDate'] = $fiscalDayDate; // Internal use only for signature
 
         return $payload;
     }
 
     /*
     |--------------------------------------------------------------------------
-    | Build Canonical String for CloseDay Signature (FDMS Spec 13.3.1)
+    | Build Canonical String for CloseDay Signature (v7.2 Spec)
+    |--------------------------------------------------------------------------
+    | ZIMRA v7.2 CloseDay Canonical String Format (Section 13.3.1):
+    | deviceID || fiscalDayNo || fiscalDayDate || fiscalDayCounters
+    | 
+    | Field Order (CRITICAL - DO NOT CHANGE):
+    | 1. deviceID (int as string)
+    | 2. fiscalDayNo (int as string)
+    | 3. fiscalDayDate (YYYY-MM-DD - date when fiscal day was OPENED, NOT closed)
+    | 4. fiscalDayCounters (concatenated counter strings)
+    |
+    | CRITICAL: fiscalDayDate is the opening date (YYYY-MM-DD), NOT fiscalDayClosed!
+    | The payload contains fiscalDayClosed (closing timestamp), but signature uses
+    | fiscalDayDate (opening date) per spec Section 13.3.1
+    | 
+    | NOTE: receiptCounter is NOT part of the canonical string for signature!
     |--------------------------------------------------------------------------
     */
-    private function buildCloseDayCanonicalString(array $payload, int $deviceId): string
+    private function buildCloseDayCanonicalString(array $payload, int $deviceId, string $fiscalDayDate): string
     {
         $parts = [];
         
@@ -1182,21 +1393,22 @@ class ZimraDeviceService
         // 2. fiscalDayNo
         $parts[] = (string) $payload['fiscalDayNo'];
         
-        // 3. fiscalDayDate (YYYY-MM-DD format)
-        $parts[] = $payload['fiscalDayDate'];
+        // 3. fiscalDayDate - YYYY-MM-DD format (when day was OPENED)
+        $parts[] = $fiscalDayDate;
         
-        // 4. fiscalDayCounters - concatenated string
+        // 4. fiscalDayCounters - concatenated string (NO receiptCounter!)
         $countersString = $this->buildCloseDayCountersString($payload['fiscalDayCounters']);
         $parts[] = $countersString;
         
         $canonicalString = implode('', $parts);
         
-        Log::info('CLOSEDAY_CANONICAL_STRING', [
+        Log::info('CloseDay v7.2 - Canonical String Built', [
             'deviceID' => $parts[0],
             'fiscalDayNo' => $parts[1],
             'fiscalDayDate' => $parts[2],
-            'fiscalDayCounters' => $parts[3],
-            'full_string' => $canonicalString,
+            'fiscalDayCounters_string' => $parts[3],
+            'full_canonical_string' => $canonicalString,
+            'canonical_length' => strlen($canonicalString),
         ]);
         
         return $canonicalString;
@@ -1216,20 +1428,67 @@ class ZimraDeviceService
             return '';
         }
         
-        // Sort counters per FDMS spec
+        /*
+        |--------------------------------------------------------------------------
+        | Deterministic 4-Level Sorting for All Counter Types
+        |--------------------------------------------------------------------------
+        | Level 1: fiscalCounterType (SaleByTax < SaleByMoneyType < SalesTotal)
+        | Level 2: fiscalCounterCurrency (alphabetical)
+        | Level 3: fiscalCounterTaxID (if present, ascending) OR fiscalCounterMoneyType (alphabetical)
+        | Level 4: fiscalCounterTaxPercent (if present, ascending)
+        |--------------------------------------------------------------------------
+        */
         usort($counters, function ($a, $b) {
-            // First by fiscalCounterType
-            $typeOrder = ['SaleByTax' => 0, 'SaleTaxByTax' => 1, 'CreditNoteByTax' => 2, 
-                          'CreditNoteTaxByTax' => 3, 'DebitNoteByTax' => 4, 'DebitNoteTaxByTax' => 5];
+            // Level 1: Sort by fiscalCounterType
+            $typeOrder = [
+                'SaleByTax' => 1,
+                'SaleTaxByTax' => 2,
+                'CreditNoteByTax' => 3,
+                'CreditNoteTaxByTax' => 4,
+                'DebitNoteByTax' => 5,
+                'DebitNoteTaxByTax' => 6,
+                'BalanceByMoneyType' => 7,
+            ];
             $typeCompare = ($typeOrder[$a['fiscalCounterType']] ?? 99) <=> ($typeOrder[$b['fiscalCounterType']] ?? 99);
             if ($typeCompare !== 0) return $typeCompare;
             
-            // Then by currency (alphabetical)
+            // Level 2: Sort by currency (alphabetical)
             $currencyCompare = strcmp($a['fiscalCounterCurrency'], $b['fiscalCounterCurrency']);
             if ($currencyCompare !== 0) return $currencyCompare;
             
-            // Then by taxID (ascending)
-            return ($a['fiscalCounterTaxID'] ?? 0) <=> ($b['fiscalCounterTaxID'] ?? 0);
+            // Level 3: Sort by taxID (if present) OR moneyType (if present)
+            $aTaxID = $a['fiscalCounterTaxID'] ?? null;
+            $bTaxID = $b['fiscalCounterTaxID'] ?? null;
+            $aMoneyType = $a['fiscalCounterMoneyType'] ?? null;
+            $bMoneyType = $b['fiscalCounterMoneyType'] ?? null;
+            
+            if ($aTaxID !== null && $bTaxID !== null) {
+                // Both have taxID - compare numerically
+                $taxIDCompare = $aTaxID <=> $bTaxID;
+                if ($taxIDCompare !== 0) return $taxIDCompare;
+            } elseif ($aMoneyType !== null && $bMoneyType !== null) {
+                // Both have moneyType - compare alphabetically
+                $moneyTypeCompare = strcmp($aMoneyType, $bMoneyType);
+                if ($moneyTypeCompare !== 0) return $moneyTypeCompare;
+            } elseif ($aTaxID !== null && $bTaxID === null) {
+                return -1; // taxID comes before no taxID
+            } elseif ($aTaxID === null && $bTaxID !== null) {
+                return 1; // no taxID comes after taxID
+            }
+            
+            // Level 4: Sort by taxPercent (if present)
+            $aTaxPercent = $a['fiscalCounterTaxPercent'] ?? null;
+            $bTaxPercent = $b['fiscalCounterTaxPercent'] ?? null;
+            
+            if ($aTaxPercent !== null && $bTaxPercent !== null) {
+                return $aTaxPercent <=> $bTaxPercent;
+            } elseif ($aTaxPercent !== null && $bTaxPercent === null) {
+                return -1;
+            } elseif ($aTaxPercent === null && $bTaxPercent !== null) {
+                return 1;
+            }
+            
+            return 0; // Equal
         });
         
         $counterStrings = [];
@@ -1401,18 +1660,22 @@ class ZimraDeviceService
     | Submit Receipt (mTLS + Signing)
     |--------------------------------------------------------------------------
     */
-    public function submitReceipt(array $receiptData)
+    public function submitReceipt(array $receiptData, int $deviceId = null)
     {
-        $zimraConfig = ZimraConfig::getActive();
-
-        if (!$zimraConfig) {
-            throw new \Exception('No active ZIMRA configuration found.');
+        // CRITICAL: device_id MUST be provided (no fallback to getActive)
+        if (!$deviceId) {
+            throw new \Exception(
+                'CRITICAL: device_id is required. ' .
+                'Device ID must be provided by ResolveCompanyDevice middleware. ' .
+                'Do not call this method without specifying device_id.'
+            );
         }
 
-        $deviceId = $zimraConfig->device_id;
+        // Load config for THIS specific device (not getActive)
+        $zimraConfig = ZimraConfig::where('device_id', $deviceId)->first();
 
-        if (!$deviceId) {
-            throw new \Exception('No device ID found in configuration.');
+        if (!$zimraConfig) {
+            throw new \Exception("No ZIMRA configuration found for device {$deviceId}.");
         }
 
         $baseUrl = $zimraConfig->base_url;
@@ -1537,36 +1800,76 @@ class ZimraDeviceService
 
         /*
         |--------------------------------------------------------------------------
-        | 6️⃣ Calculate Receipt Counters (with DB transaction and row locking)
+        | 6️⃣ Calculate Receipt Counters from device_states (SINGLE SOURCE OF TRUTH)
         |--------------------------------------------------------------------------
-        | CRITICAL: Use lockForUpdate() to prevent race conditions and duplicates
-        | Use max() instead of orderBy()->first() for better performance
+        | CRITICAL: Counters come ONLY from device_states, NOT from receipts table
+        | This ensures atomic counter management and FDMS alignment
         |--------------------------------------------------------------------------
         */
-        DB::transaction(function () use ($deviceId, $fiscalDayNo, &$receiptData) {
-            // Lock rows and get max counter for this fiscal day
-            $maxReceiptCounter = Receipt::where('device_id', $deviceId)
-                ->where('fiscal_day_no', $fiscalDayNo)
-                ->lockForUpdate()
-                ->max('receipt_counter');
-            
-            $nextReceiptCounter = ($maxReceiptCounter ?? 0) + 1;
-
-            // Lock rows and get max global counter across all fiscal days
-            $maxGlobalNo = Receipt::where('device_id', $deviceId)
-                ->lockForUpdate()
-                ->max('receipt_global_no');
-            
-            $nextGlobalNo = ($maxGlobalNo ?? 0) + 1;
-
-            Log::info('ZIMRA SubmitReceipt - Counter Calculation (locked)', [
-                'max_receipt_counter' => $maxReceiptCounter ?? 0,
-                'next_receipt_counter' => $nextReceiptCounter,
-                'max_global_no' => $maxGlobalNo ?? 0,
-                'next_global_no' => $nextGlobalNo,
-                'fdms_fiscal_day_no' => $fiscalDayNo,
+        
+        // Check device_state reconciliation status BEFORE proceeding
+        $deviceState = DeviceState::where('device_id', $deviceId)->first();
+        
+        if (!$deviceState) {
+            throw new \Exception(
+                "CRITICAL: No device_state record found for device {$deviceId}. " .
+                "Run migration: php artisan migrate"
+            );
+        }
+        
+        if ($deviceState->requires_reconciliation) {
+            throw new \Exception(
+                "CRITICAL: Device {$deviceId} requires reconciliation. " .
+                "FDMS accepted a receipt but DB persistence failed. " .
+                "Error: {$deviceState->reconciliation_error}. " .
+                "Manual intervention required."
+            );
+        }
+        
+        // Verify FDMS state alignment with device_state
+        $fdmsLastGlobal = $fdmsStatus['lastReceiptGlobalNo'] ?? 0;
+        $deviceStateLastGlobal = $deviceState->last_receipt_global_no;
+        
+        if ($fdmsLastGlobal !== $deviceStateLastGlobal) {
+            Log::critical('FDMS_DEVICE_STATE_MISALIGNMENT', [
+                'device_id' => $deviceId,
+                'fdms_last_global' => $fdmsLastGlobal,
+                'device_state_last_global' => $deviceStateLastGlobal,
+                'difference' => $fdmsLastGlobal - $deviceStateLastGlobal,
             ]);
-
+            
+            throw new \Exception(
+                "CRITICAL: FDMS/device_state misalignment detected. " .
+                "FDMS lastReceiptGlobalNo: {$fdmsLastGlobal}, " .
+                "device_state last_receipt_global_no: {$deviceStateLastGlobal}. " .
+                "Reconciliation required before proceeding."
+            );
+        }
+        
+        // Calculate counters from device_state (NOT from receipts table)
+        DB::transaction(function () use ($deviceId, $fiscalDayNo, &$receiptData) {
+            // Lock device_state row (prevents concurrent access)
+            $lockedDeviceState = DeviceState::where('device_id', $deviceId)
+                ->lockForUpdate()
+                ->first();
+            
+            if (!$lockedDeviceState) {
+                throw new \Exception("CRITICAL: device_state row disappeared during transaction");
+            }
+            
+            // Calculate next counters from device_state (SINGLE SOURCE OF TRUTH)
+            $nextReceiptCounter = $lockedDeviceState->getNextReceiptCounter($fiscalDayNo);
+            $nextGlobalNo = $lockedDeviceState->getNextGlobalNo();
+            
+            Log::info('ZIMRA SubmitReceipt - Counters from device_state (LOCKED)', [
+                'device_state_last_fiscal_day' => $lockedDeviceState->last_fiscal_day_no,
+                'device_state_last_counter' => $lockedDeviceState->last_receipt_counter,
+                'device_state_last_global' => $lockedDeviceState->last_receipt_global_no,
+                'fdms_fiscal_day_no' => $fiscalDayNo,
+                'next_receipt_counter' => $nextReceiptCounter,
+                'next_global_no' => $nextGlobalNo,
+            ]);
+            
             // Override counters with calculated values
             $receiptData['receiptCounter'] = $nextReceiptCounter;
             $receiptData['receiptGlobalNo'] = $nextGlobalNo;
@@ -1828,7 +2131,9 @@ class ZimraDeviceService
         $primaryTax = $receiptData['receiptTaxes'][0] ?? [];
 
         // Determine receiptType based on VAT registration (fallback if not set in receiptData)
-        $defaultReceiptType = (!$vatNumber || $vatNumber === 'NOT_REGISTERED') ? 'FiscalReceipt' : 'FiscalInvoice';
+        // NOTE: FDMS only supports FiscalInvoice, CreditNote, DebitNote, Refund
+        // Non-VAT devices use FiscalInvoice with 0% tax
+        $defaultReceiptType = 'FiscalInvoice';
         
         $receipt = Receipt::create([
             'device_id' => $deviceId,
@@ -1870,7 +2175,27 @@ class ZimraDeviceService
 
         /*
         |--------------------------------------------------------------------------
-        | 🔟 Throw Exception if Red or Gray errors (Block CloseDay)
+        | 🔟 Increment device_state Counters (CRITICAL)
+        |--------------------------------------------------------------------------
+        | ONLY increment after successful FDMS submission AND DB persistence
+        |--------------------------------------------------------------------------
+        */
+        $deviceState->incrementCounters(
+            $fiscalDayNo,
+            $receiptData['receiptCounter'],
+            $receiptData['receiptGlobalNo']
+        );
+        
+        Log::info('device_state counters incremented', [
+            'device_id' => $deviceId,
+            'fiscal_day_no' => $fiscalDayNo,
+            'receipt_counter' => $receiptData['receiptCounter'],
+            'global_no' => $receiptData['receiptGlobalNo'],
+        ]);
+
+        /*
+        |--------------------------------------------------------------------------
+        | 1️⃣1️⃣ Throw Exception if Red or Gray errors (Block CloseDay)
         |--------------------------------------------------------------------------
         */
         if ($hasRedErrors) {
@@ -2334,7 +2659,9 @@ class ZimraDeviceService
         |--------------------------------------------------------------------------
         */
         // Determine receiptType based on VAT registration
-        $defaultReceiptType = (!$vatNumber || $vatNumber === 'NOT_REGISTERED') ? 'FiscalReceipt' : 'FiscalInvoice';
+        // NOTE: FDMS only supports FiscalInvoice, CreditNote, DebitNote, Refund
+        // Non-VAT devices use FiscalInvoice with 0% tax
+        $defaultReceiptType = 'FiscalInvoice';
         
         $canonicalReceipt = [
             'receiptType' => $receiptData['receiptType'] ?? $defaultReceiptType,
@@ -2537,7 +2864,9 @@ class ZimraDeviceService
 
         // Build canonical receipt - NO fiscalDayNo, NO receiptDeviceSignature
         // Determine receiptType based on VAT registration
-        $defaultReceiptType = (!$vatNumber || $vatNumber === 'NOT_REGISTERED') ? 'FiscalReceipt' : 'FiscalInvoice';
+        // NOTE: FDMS only supports FiscalInvoice, CreditNote, DebitNote, Refund
+        // Non-VAT devices use FiscalInvoice with 0% tax
+        $defaultReceiptType = 'FiscalInvoice';
         
         $canonical = [
             'receiptType' => $receiptData['receiptType'] ?? $defaultReceiptType,

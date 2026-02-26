@@ -316,10 +316,15 @@ class ZimraController extends Controller
     public function status(ZimraDeviceService $zimra)
     {
         try {
-            $status = $zimra->getStatus();
+            // Get device_id from active config
+            $config = ZimraConfig::where('is_active', true)->first();
+            if (!$config) {
+                return response()->json(['error' => 'No active device configured'], 400);
+            }
+            
+            $status = $zimra->getStatus($config->device_id);
             
             // Save status data to config for QR code generation
-            $config = ZimraConfig::getActive();
             if ($config && !isset($status['error'])) {
                 $config->update([
                     'fiscal_day_status' => $status['fiscalDayStatus'] ?? null,
@@ -346,7 +351,13 @@ class ZimraController extends Controller
         $fiscalDayNo = $request->input('fiscal_day_no');
 
         try {
-            $result = $zimra->openDay($fiscalDayNo);
+            // Get device_id from active config
+            $config = \App\Models\ZimraConfig::where('is_active', true)->first();
+            if (!$config) {
+                return response()->json(['error' => 'No active device configured'], 400);
+            }
+            
+            $result = $zimra->openDay($fiscalDayNo, $config->device_id);
             
             if (isset($result['error']) && $result['error']) {
                 return response()->json($result, 400);
@@ -368,8 +379,14 @@ class ZimraController extends Controller
     public function closeDay(Request $request, ZimraDeviceService $zimra)
     {
         try {
+            // Get device_id from active config
+            $config = \App\Models\ZimraConfig::where('is_active', true)->first();
+            if (!$config) {
+                return response()->json(['error' => 'No active device configured'], 400);
+            }
+            
             $payload = $request->all();
-            $result = $zimra->closeDay(empty($payload) ? null : $payload);
+            $result = $zimra->closeDay(empty($payload) ? null : $payload, $config->device_id);
             
             if (isset($result['error']) && $result['error']) {
                 return response()->json($result, 400);
@@ -420,7 +437,8 @@ class ZimraController extends Controller
             // Also get ZIMRA status directly for debugging
             $zimraStatus = null;
             try {
-                $zimraStatus = $zimra->getStatus();
+                $config = \App\Models\ZimraConfig::where('is_active', true)->first();
+                $zimraStatus = $config ? $zimra->getStatus($config->device_id) : ['error' => 'No active device'];
             } catch (\Exception $e) {
                 $zimraStatus = ['error' => $e->getMessage()];
             }
@@ -470,7 +488,11 @@ class ZimraController extends Controller
             }
 
             // Get FDMS status
-            $fdmsStatus = $zimra->getStatus();
+            $config = \App\Models\ZimraConfig::where('is_active', true)->first();
+            if (!$config) {
+                return response()->json(['error' => 'No active device configured'], 400);
+            }
+            $fdmsStatus = $zimra->getStatus($config->device_id);
             
             if (isset($fdmsStatus['error'])) {
                 return response()->json([
@@ -551,7 +573,18 @@ class ZimraController extends Controller
     {
         try {
             $data = $request->all();
-            $result = $zimra->submitReceipt($data);
+            
+            // Get device_id from active config (temporary until middleware is implemented)
+            $config = \App\Models\ZimraConfig::where('is_active', true)->first();
+            if (!$config) {
+                return response()->json([
+                    'error' => 'No active ZIMRA device configuration found'
+                ], 400);
+            }
+            
+            $deviceId = $config->device_id;
+            
+            $result = $zimra->submitReceipt($data, $deviceId);
 
             // Log full ZIMRA response for debugging
             \Log::info('ZIMRA submitReceipt Response', $result);
@@ -560,67 +593,8 @@ class ZimraController extends Controller
                 return response()->json($result, 400);
             }
 
-            // Validate receiptID - CRITICAL for verification
-            $receiptID = $result['data']['receiptID'] ?? $result['receiptID'] ?? null;
-            if (!$receiptID) {
-                \Log::error('ZIMRA Receipt not accepted - No receiptID returned', $result);
-                return response()->json([
-                    'error' => 'Receipt not accepted by ZIMRA. No verification possible.',
-                    'zimra_response' => $result,
-                ], 400);
-            }
-
-            // Save receipt to database
-            $config = ZimraConfig::getActive();
-            
-            // Get fiscalDayNo and receiptGlobalNo from request or ZIMRA response
-            $fiscalDayNo = $data['fiscalDayNo'] ?? $result['fiscal_day_no'] ?? 1;
-            $receiptGlobalNo = $data['receiptGlobalNo'] ?? $data['receiptCounter'] ?? 1;
-            
-            // Validate QR requirements
-            if (!$config->qr_url) {
-                \Log::error('QR generation failed: qr_url not set. Call getConfig first.');
-                throw new \Exception("QR generation failed: Missing qr_url. Call getConfig first.");
-            }
-            
-            // Build QR string immediately with submitted values
-            $qrString = $config->qr_url .
-                "?deviceID=" . $config->device_id .
-                "&receiptID=" . $receiptID .
-                "&fiscalDayNo=" . $fiscalDayNo .
-                "&receiptGlobalNo=" . $receiptGlobalNo;
-            
-            \Log::info('QR String built', ['qr_string' => $qrString]);
-            
-            $receipt = Receipt::create([
-                'device_id' => $config->device_id,
-                'invoice_no' => $data['invoiceNo'] ?? '',
-                'receipt_type' => $data['receiptType'] ?? 'FiscalInvoice',
-                'receipt_currency' => $data['receiptCurrency'] ?? 'USD',
-                'receipt_counter' => $data['receiptCounter'] ?? 1,
-                'receipt_global_no' => $receiptGlobalNo,
-                'fiscal_day_no' => $fiscalDayNo,
-                'receipt_total' => $data['receiptTotal'] ?? 0,
-                'tax_amount' => $data['receiptTaxes'][0]['taxAmount'] ?? 0,
-                'tax_code' => $data['receiptTaxes'][0]['taxCode'] ?? 'A',
-                'tax_percent' => $data['receiptTaxes'][0]['taxPercent'] ?? 15,
-                'payment_method' => $data['receiptPayments'][0]['moneyTypeCode'] ?? 'Cash',
-                'receipt_lines' => $data['receiptLines'] ?? [],
-                'receipt_taxes' => $data['receiptTaxes'] ?? [],
-                'receipt_payments' => $data['receiptPayments'] ?? [],
-                'receipt_hash' => $result['receiptHash'] ?? null,
-                'receipt_signature' => $result['data']['receiptServerSignature'] ?? $result['receiptServerSignature'] ?? null,
-                'receipt_qr_code' => $qrString,
-                'verification_code' => null, // Never generated locally - comes from portal scan
-                'zimra_response' => $result,
-                'receipt_date' => now(),
-            ]);
-
-            $result['receipt_id'] = $receipt->id;
-            $result['qr_string'] = $qrString;
-
-            \Log::info('Receipt saved successfully', ['receipt_id' => $receipt->id, 'zimra_receipt_id' => $receiptID]);
-
+            // Service already saved the receipt with correct counters
+            // Just return the result from the service
             return response()->json($result);
         } catch (\Exception $e) {
             \Log::error('submitReceipt failed', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);

@@ -612,7 +612,8 @@
                                     <div>
                                         <label class="block text-sm font-medium text-gray-700 mb-1">Receipt Type</label>
                                         <select x-model="receiptForm.receiptType" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
-                                            <option value="FiscalInvoice">Fiscal Invoice</option>
+                                            <option value="FiscalReceipt">Fiscal Receipt (Non-VAT)</option>
+                                            <option value="FiscalInvoice">Fiscal Invoice (VAT)</option>
                                             <option value="CreditNote">Credit Note</option>
                                             <option value="DebitNote">Debit Note</option>
                                         </select>
@@ -1556,7 +1557,7 @@
                         const counter = (this.fiscalDay?.fiscal_day?.receipt_counter || 0) + 1;
                         
                         const payload = {
-                            receiptType: this.receiptForm.receiptType,
+                            // receiptType auto-determined by backend based on VAT registration
                             receiptCurrency: this.receiptForm.receiptCurrency,
                             receiptCounter: counter,
                             receiptGlobalNo: counter,
@@ -1639,10 +1640,8 @@
                         if (res.ok && !data.error) {
                             this.showMessage('Receipt submitted successfully!', 'success');
                             this.lastReceiptResponse = data;
-                            // Reload page after short delay to show success message
-                            setTimeout(() => {
-                                window.location.reload();
-                            }, 1500);
+                            // Reload page immediately
+                            window.location.reload();
                         } else {
                             this.showMessage(data.error || data.message || 'Failed to submit receipt', 'error');
                         }

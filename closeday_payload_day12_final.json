@@ -1,0 +1,25 @@
+{
+    "deviceID": 32558,
+    "fiscalDayNo": 12,
+    "fiscalDayCounters": [
+        {
+            "fiscalCounterType": "SaleByTax",
+            "fiscalCounterCurrency": "USD",
+            "fiscalCounterTaxPercent": 0.0,
+            "fiscalCounterTaxID": 513,
+            "fiscalCounterValue": 50.0
+        },
+        {
+            "fiscalCounterType": "BalanceByMoneyType",
+            "fiscalCounterCurrency": "USD",
+            "fiscalCounterMoneyType": "Cash",
+            "fiscalCounterValue": 50.0
+        }
+    ],
+    "receiptCounter": 1,
+    "fiscalDayClosed": "2026-02-26T19:50:04",
+    "fiscalDayDeviceSignature": {
+        "hash": "SK0VMJSMhtW7Wlj+xfWbKc4a9jk6fT+866zDiqRMP98=",
+        "signature": "MEYCIQDTFmtCIrJCgo/ekO9apkp8L/yLc/pgyFtAexEJtzl1YAIhAIi+/kG3bKm1Wv5EvMysXsZlYHNdVpMU7rqk1wC57AM2"
+    }
+}
