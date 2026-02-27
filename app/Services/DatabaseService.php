@@ -889,22 +889,201 @@ class DatabaseService
     public function createCreditNotes(array $data, bool $zimraFiscalize = false): array
     {
         $created = [];
+        $zimraErrors = [];
 
         foreach ($data as $noteData) {
+            $saleId = $noteData['sale_id'] ?? null;
+            
+            if (!$saleId) {
+                throw new \Exception('sale_id is required for credit note creation');
+            }
+
+            $sale = PanierSale::where('panier_id', $saleId)->first();
+            if (!$sale) {
+                throw new \Exception("Sale with ID {$saleId} not found");
+            }
+
+            $products = $noteData['products'] ?? [];
+            $total = 0;
+            
+            foreach ($products as $product) {
+                $quantity = $product['quantity'] ?? 0;
+                $price = $product['selling_price'] ?? 0;
+                $total += ($quantity * $price);
+            }
+
             $note = PanierCreditNote::create([
                 'panier_id' => Str::ulid()->toString(),
-                'sale_id' => $noteData['sale_id'] ?? null,
-                'customer_id' => $noteData['customer_id'] ?? null,
-                'total' => $noteData['total'] ?? 0,
+                'sale_id' => $saleId,
+                'customer_id' => $noteData['customer_id'] ?? $sale->customer_id,
+                'total' => -abs($total),
                 'reason' => $noteData['reason'] ?? null,
                 'zimra_fiscalized' => $zimraFiscalize,
-                'products' => $noteData['products'] ?? null,
+                'products' => $products,
                 'panier_data' => $noteData,
             ]);
-            $created[] = $this->formatCreditNote($note);
+
+            if ($zimraFiscalize) {
+                try {
+                    $zimraResult = $this->submitCreditNoteToZimra($note, $sale, $noteData);
+                    
+                    if (isset($zimraResult['error'])) {
+                        $zimraErrors[] = [
+                            'credit_note_id' => $note->panier_id,
+                            'error' => $zimraResult,
+                        ];
+                    } else {
+                        $note->update([
+                            'zimra_fiscal_code' => $zimraResult['fdms_receipt_id'] ?? null,
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    $zimraErrors[] = [
+                        'credit_note_id' => $note->panier_id,
+                        'error' => $e->getMessage(),
+                    ];
+                }
+            }
+            
+            $created[] = $this->formatCreditNote($note->fresh());
         }
 
-        return ['created' => $created];
+        $result = ['created' => $created];
+        
+        if (!empty($zimraErrors)) {
+            $result['zimra_errors'] = $zimraErrors;
+        }
+
+        return $result;
+    }
+
+    protected function submitCreditNoteToZimra(PanierCreditNote $creditNote, PanierSale $sale, array $noteData): array
+    {
+        $zimraService = app(\App\Services\ZimraDeviceService::class);
+        $zimraConfig = \App\Models\ZimraConfig::getActive();
+        
+        if (!$zimraConfig || !$zimraConfig->device_id) {
+            throw new \Exception('No active ZIMRA configuration found');
+        }
+
+        $deviceId = $zimraConfig->device_id;
+        
+        $originalReceipt = \App\Models\Receipt::where('device_id', $deviceId)
+            ->where('invoice_no', $sale->panier_id)
+            ->orWhere('invoice_no', 'LIKE', '%' . substr($sale->panier_id, -8))
+            ->first();
+
+        if (!$originalReceipt) {
+            throw new \Exception(
+                "Original receipt not found for sale {$sale->panier_id}. " .
+                "Cannot create credit note without original ZIMRA receipt."
+            );
+        }
+
+        $currency = $sale->currency ? \App\Models\PanierCurrency::where('panier_id', $sale->currency_id)->first() : null;
+        $currencyCode = $currency?->code ?? 'USD';
+
+        $receiptLines = [];
+        $receiptTaxes = [];
+        $taxGroups = [];
+
+        foreach ($creditNote->products as $product) {
+            $productModel = PanierProduct::where('panier_id', $product['id'])->first();
+            $quantity = $product['quantity'] ?? 1;
+            $price = -abs($product['selling_price'] ?? 0);
+            
+            $tax = $productModel?->tax;
+            $taxPercent = $tax ? (float) $tax->percentage : 0;
+            $taxId = $tax?->zimra_tax_id ?? 1;
+            $taxCode = $tax?->code ?? 'A';
+
+            $lineTotal = $price * $quantity;
+            $taxAmount = $lineTotal * ($taxPercent / (100 + $taxPercent));
+            $lineAmountWithoutTax = $lineTotal - $taxAmount;
+
+            $receiptLines[] = [
+                'receiptLineType' => 'Sale',
+                'receiptLineNo' => count($receiptLines) + 1,
+                'receiptLineHSCode' => $productModel?->hs_code ?? '',
+                'receiptLineName' => $productModel?->name ?? $product['name'] ?? 'Product',
+                'receiptLinePrice' => round($price, 2),
+                'receiptLineQuantity' => $quantity,
+                'receiptLineTotal' => round($lineTotal, 2),
+                'taxPercent' => $taxPercent,
+                'taxID' => $taxId,
+                'taxCode' => $taxCode,
+            ];
+
+            $taxKey = "{$taxId}_{$taxPercent}";
+            if (!isset($taxGroups[$taxKey])) {
+                $taxGroups[$taxKey] = [
+                    'taxID' => $taxId,
+                    'taxPercent' => $taxPercent,
+                    'taxCode' => $taxCode,
+                    'taxAmount' => 0,
+                    'salesAmountWithTax' => 0,
+                ];
+            }
+            $taxGroups[$taxKey]['taxAmount'] += $taxAmount;
+            $taxGroups[$taxKey]['salesAmountWithTax'] += $lineTotal;
+        }
+
+        foreach ($taxGroups as $tax) {
+            $receiptTaxes[] = [
+                'taxID' => $tax['taxID'],
+                'taxPercent' => $tax['taxPercent'],
+                'taxCode' => $tax['taxCode'],
+                'taxAmount' => round($tax['taxAmount'], 2),
+                'salesAmountWithTax' => round($tax['salesAmountWithTax'], 2),
+            ];
+        }
+
+        $receiptTotal = round((float) $creditNote->total, 2);
+
+        $receiptPayments = [
+            [
+                'moneyTypeCode' => $sale->payment_method ?? 'Cash',
+                'paymentAmount' => $receiptTotal,
+            ]
+        ];
+
+        $receiptData = [
+            'receiptType' => 'CreditNote',
+            'receiptCurrency' => $currencyCode,
+            'invoiceNo' => 'CN-' . strtoupper(substr($creditNote->panier_id, -8)),
+            'receiptNotes' => $creditNote->reason ?? 'Credit note',
+            'creditDebitNote' => [
+                'creditDebitNoteReceiptGlobalNo' => $originalReceipt->receipt_global_no,
+                'creditDebitNoteDate' => $originalReceipt->receipt_date->format('Y-m-d\TH:i:s'),
+            ],
+            'receiptDate' => now()->format('Y-m-d\TH:i:s'),
+            'receiptLines' => $receiptLines,
+            'receiptTaxes' => $receiptTaxes,
+            'receiptPayments' => $receiptPayments,
+            'receiptTotal' => $receiptTotal,
+        ];
+
+        if ($sale->customer_id) {
+            $customer = PanierCustomer::where('panier_id', $sale->customer_id)->first();
+            if ($customer) {
+                $receiptData['buyerData'] = [
+                    'buyerRegisterName' => $customer->name,
+                    'buyerTradeName' => $customer->name,
+                    'buyerTIN' => $customer->tax_id ?? '',
+                    'buyerContacts' => [
+                        'phoneNo' => $customer->phone ?? '',
+                        'email' => $customer->email ?? '',
+                    ],
+                    'buyerAddress' => [
+                        'street' => $customer->address ?? '',
+                        'city' => '',
+                        'country' => 'ZW',
+                    ],
+                ];
+            }
+        }
+
+        return $zimraService->submitReceipt($receiptData, $deviceId);
     }
 
     public function searchCreditNotes(string $query = '*', int $limit = 10, int $skip = 0): array

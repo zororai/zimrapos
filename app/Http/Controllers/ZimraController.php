@@ -606,6 +606,79 @@ class ZimraController extends Controller
 
     /*
     |--------------------------------------------------------------------------
+    | Submit Credit Note (Production-Safe with BCMath)
+    |--------------------------------------------------------------------------
+    */
+    public function submitCreditNote(Request $request, ZimraDeviceService $zimra)
+    {
+        try {
+            $validated = $request->validate([
+                'original_receipt_id' => 'required|integer',
+                'selected_lines' => 'required|array|min:1',
+                'selected_lines.*.line_index' => 'required|integer|min:0',
+                'selected_lines.*.quantity' => 'required|numeric|min:0.01',
+                'reason' => 'required|string|max:500',
+                'payment_method' => 'nullable|string',
+            ]);
+
+            // Get active config
+            $config = \App\Models\ZimraConfig::where('is_active', true)->first();
+            if (!$config) {
+                return response()->json([
+                    'error' => 'No active ZIMRA device configuration found'
+                ], 400);
+            }
+
+            // Get original receipt
+            $originalReceipt = Receipt::where('id', $validated['original_receipt_id'])
+                ->where('device_id', $config->device_id)
+                ->first();
+
+            if (!$originalReceipt) {
+                return response()->json([
+                    'error' => 'Original receipt not found or does not belong to this device'
+                ], 404);
+            }
+
+            // Build credit note using BCMath builder
+            $creditNotePayload = CreditNoteBuilder::buildCreditNoteFromReceipt(
+                $originalReceipt,
+                $validated['selected_lines'],
+                $validated['reason'],
+                $validated['payment_method'] ?? null
+            );
+
+            // Log the payload (receiptTotal and receiptPayments will be calculated by buildAndValidateReceiptBCMath)
+            \Log::info('Credit Note Payload Built', [
+                'receipt_type' => $creditNotePayload['receiptType'],
+                'line_count' => count($creditNotePayload['receiptLines']),
+                'invoice_no' => $creditNotePayload['invoiceNo'],
+            ]);
+
+            // Submit to ZIMRA (buildAndValidateReceiptBCMath will calculate receiptTotal and receiptPayments)
+            $result = $zimra->submitReceipt($creditNotePayload, $config->device_id);
+
+            // Log full ZIMRA response
+            \Log::info('ZIMRA Credit Note Response', $result);
+
+            if (isset($result['error']) && $result['error']) {
+                return response()->json($result, 400);
+            }
+
+            return response()->json($result);
+        } catch (\Exception $e) {
+            \Log::error('submitCreditNote failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'error' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Download Receipt PDF
     |--------------------------------------------------------------------------
     */
@@ -630,15 +703,45 @@ class ZimraController extends Controller
         $config = ZimraConfig::getActive();
         
         if (!$config || !$config->device_id) {
-            return response()->json([]);
+            return response()->json(['receipts' => []]);
         }
 
+        // Get ZIMRA receipts
         $receipts = Receipt::where('device_id', $config->device_id)
             ->orderBy('created_at', 'desc')
             ->limit(50)
             ->get();
+        
+        // Also get Panier sales that were fiscalized
+        $panierSales = \App\Models\PanierSale::where('zimra_fiscalized', true)
+            ->orderBy('created_at', 'desc')
+            ->limit(50)
+            ->get()
+            ->map(function($sale) use ($config) {
+                // Find the corresponding ZIMRA receipt
+                $receipt = Receipt::where('device_id', $config->device_id)
+                    ->where('invoice_no', 'LIKE', '%' . substr($sale->panier_id, -8))
+                    ->first();
+                
+                if ($receipt) {
+                    return $receipt;
+                }
+                
+                // If no receipt found, create a pseudo-receipt object from the sale
+                return (object)[
+                    'id' => $sale->panier_id,
+                    'invoice_no' => 'SALE-' . substr($sale->panier_id, -8),
+                    'receipt_type' => 'FiscalInvoice',
+                    'receipt_currency' => $sale->currency_id ?? 'USD',
+                    'receipt_total' => $sale->total,
+                    'created_at' => $sale->created_at,
+                    'is_panier_sale' => true,
+                    'panier_data' => $sale
+                ];
+            })
+            ->filter();
             
-        return response()->json($receipts);
+        return response()->json(['receipts' => $receipts]);
     }
 
     /*

@@ -158,6 +158,9 @@
                     <button @click="activeTab = 'receipts'" class="px-6 py-4 text-sm font-medium border-b-2 transition-colors" :class="activeTab === 'receipts' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
                         Submit Receipt
                     </button>
+                    <button @click="activeTab = 'creditnotes'; loadSales()" class="px-6 py-4 text-sm font-medium border-b-2 transition-colors" :class="activeTab === 'creditnotes' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
+                        Credit Notes
+                    </button>
                     <button @click="activeTab = 'submitfile'" class="px-6 py-4 text-sm font-medium border-b-2 transition-colors" :class="activeTab === 'submitfile' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
                         Submit File
                     </button>
@@ -592,11 +595,6 @@
                             <span>Refresh</span>
                         </button>
                     </div>
-                    
-                    <!-- Debug: Show fiscal day data -->
-                    <div class="mb-4 p-3 bg-gray-100 rounded text-xs overflow-x-auto">
-                        <strong>Debug fiscalDay:</strong> <pre x-text="JSON.stringify(fiscalDay, null, 2)" class="whitespace-pre-wrap"></pre>
-                    </div>
 
                     <template x-if="!fiscalDay || !fiscalDay.is_open">
                         <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800">
@@ -917,6 +915,142 @@
                     </template>
                 </div>
 
+                <!-- Credit Notes Tab -->
+                <div x-show="activeTab === 'creditnotes'" x-cloak>
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold text-gray-900">Create Credit Note</h2>
+                        <button @click="loadSales()" class="text-sm text-green-600 hover:text-green-700 flex items-center space-x-1">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                            <span>Refresh Sales</span>
+                        </button>
+                    </div>
+
+                    <template x-if="!config?.device_id">
+                        <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800">
+                            Please register a device first before creating credit notes.
+                        </div>
+                    </template>
+
+                    <template x-if="config?.device_id">
+                        <div class="space-y-6">
+                            <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-sm">
+                                <strong>Credit Notes:</strong> Create a credit note to reverse or partially refund a previous sale. 
+                                The credit note will be automatically submitted to ZIMRA and linked to the original receipt.
+                            </div>
+
+                            <form @submit.prevent="submitCreditNote()" class="space-y-4">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Select Original Sale *</label>
+                                        <select x-model="creditNoteForm.sale_id" @change="loadSaleDetails()" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" required>
+                                            <option value="">-- Select a sale --</option>
+                                            <template x-for="sale in sales" :key="sale.id">
+                                                <option :value="sale.id" x-text="`${sale.id} - ${sale.receipt_currency || 'USD'} ${parseFloat(sale.receipt_total || 0).toFixed(2)} (${new Date(sale.created_at).toLocaleDateString()})`"></option>
+                                            </template>
+                                        </select>
+                                        <p class="text-xs text-gray-500 mt-1">Select the original sale to credit</p>
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+                                        <input type="text" x-model="creditNoteForm.currency" class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50" readonly>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Reason for Credit Note *</label>
+                                    <textarea x-model="creditNoteForm.reason" rows="3" minlength="10" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="e.g., Customer return - damaged goods (minimum 10 characters)" required></textarea>
+                                    <p class="text-xs text-gray-500 mt-1">
+                                        <span x-show="creditNoteForm.reason.length < 10" class="text-red-600 font-medium">
+                                            ⚠️ Minimum 10 characters required (<span x-text="creditNoteForm.reason.length"></span>/10)
+                                        </span>
+                                        <span x-show="creditNoteForm.reason.length >= 10" class="text-green-600">
+                                            ✓ Valid reason (<span x-text="creditNoteForm.reason.length"></span> characters)
+                                        </span>
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Products to Credit</label>
+                                    <template x-if="selectedSale">
+                                        <div class="space-y-2">
+                                            <template x-for="(line, index) in selectedSale.receipt_lines" :key="index">
+                                                <div class="p-3 bg-gray-50 rounded-lg">
+                                                    <div class="flex items-center space-x-3">
+                                                        <input type="checkbox" :id="'line-' + index" x-model="creditNoteForm.selectedLines[index]" class="w-4 h-4 text-green-600">
+                                                        <label :for="'line-' + index" class="flex-1 text-sm">
+                                                            <span class="font-medium" x-text="line.receiptLineName"></span>
+                                                            <span class="text-gray-600"> - Original Qty: </span><span x-text="line.receiptLineQuantity"></span>
+                                                            <span class="text-gray-600"> × </span><span x-text="creditNoteForm.currency + ' ' + parseFloat(line.receiptLinePrice).toFixed(2)"></span>
+                                                        </label>
+                                                    </div>
+                                                    <div x-show="creditNoteForm.selectedLines[index]" class="mt-2 ml-7 flex items-center space-x-3">
+                                                        <label class="text-xs text-gray-600">Credit Qty:</label>
+                                                        <input 
+                                                            type="number" 
+                                                            x-model.number="creditNoteForm.lineQuantities[index]"
+                                                            :max="parseFloat(line.receiptLineQuantity)"
+                                                            min="0.01"
+                                                            step="0.01"
+                                                            class="w-24 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                                            placeholder="Qty">
+                                                        <span class="text-xs text-gray-500">
+                                                            (Max: <span x-text="line.receiptLineQuantity"></span>)
+                                                        </span>
+                                                        <span class="text-sm font-medium text-gray-700">
+                                                            = <span x-text="creditNoteForm.currency + ' ' + calculateLineCredit(index).toFixed(2)"></span>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                    <template x-if="!selectedSale">
+                                        <p class="text-sm text-gray-500 italic">Select a sale to see products</p>
+                                    </template>
+                                </div>
+
+                                <div class="flex items-center justify-between pt-4 border-t border-gray-200">
+                                    <div class="text-lg">
+                                        <span class="text-gray-600">Credit Amount:</span>
+                                        <span class="font-bold text-red-600" x-text="creditNoteForm.currency + ' -' + calculateCreditTotal().toFixed(2)"></span>
+                                    </div>
+                                    <button type="submit" :disabled="loading || !creditNoteForm.sale_id || calculateCreditTotal() === 0" class="px-6 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2">
+                                        <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                        </svg>
+                                        <span>Submit Credit Note to ZIMRA</span>
+                                    </button>
+                                </div>
+                            </form>
+
+                            <!-- Credit Note Response -->
+                            <template x-if="creditNoteResponse">
+                                <div class="p-4 rounded-lg" :class="creditNoteResponse.error ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'">
+                                    <h3 class="text-sm font-semibold mb-2" :class="creditNoteResponse.error ? 'text-red-800' : 'text-green-800'">
+                                        <span x-text="creditNoteResponse.error ? 'Credit Note Failed' : 'Credit Note Submitted Successfully'"></span>
+                                    </h3>
+                                    <div class="text-sm" :class="creditNoteResponse.error ? 'text-red-700' : 'text-green-700'">
+                                        <template x-if="!creditNoteResponse.error">
+                                            <div>
+                                                <p>Receipt ID: <strong x-text="creditNoteResponse.data?.receiptID"></strong></p>
+                                                <p>Server Date: <span x-text="creditNoteResponse.data?.serverDate"></span></p>
+                                                <p>Operation ID: <span x-text="creditNoteResponse.data?.operationID"></span></p>
+                                            </div>
+                                        </template>
+                                        <template x-if="creditNoteResponse.error">
+                                            <pre class="text-xs overflow-auto max-h-64 p-2 bg-white rounded mt-2" x-text="JSON.stringify(creditNoteResponse, null, 2)"></pre>
+                                        </template>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+
                 <!-- Submit File Tab -->
                 <div x-show="activeTab === 'submitfile'" x-cloak>
                     <h2 class="text-lg font-semibold text-gray-900 mb-4">Submit File to ZIMRA</h2>
@@ -1044,6 +1178,18 @@
                 deviceStatus: null,
                 receipts: [],
                 
+                // Credit Note form
+                sales: [],
+                selectedSale: null,
+                creditNoteForm: {
+                    sale_id: '',
+                    currency: 'USD',
+                    reason: '',
+                    selectedLines: [],
+                    lineQuantities: []
+                },
+                creditNoteResponse: null,
+                
                 // Tax configuration from FDMS
                 taxConfig: {
                     isVatRegistered: false,
@@ -1114,7 +1260,8 @@
                     try {
                         const res = await fetch('/zimra/receipts');
                         if (res.ok) {
-                            this.receipts = await res.json();
+                            const data = await res.json();
+                            this.receipts = data.receipts || data || [];
                         }
                     } catch (e) {
                         console.error('Failed to load receipts:', e);
@@ -1823,6 +1970,138 @@
                     if (this.receiptForm.receiptLines.length > 1) {
                         this.receiptForm.receiptLines.splice(index, 1);
                     }
+                },
+
+                async loadSales() {
+                    try {
+                        const res = await fetch('/zimra/receipts');
+                        if (res.ok) {
+                            const data = await res.json();
+                            this.sales = data.receipts || [];
+                        }
+                    } catch (e) {
+                        console.error('Failed to load sales:', e);
+                    }
+                },
+
+                loadSaleDetails() {
+                    this.selectedSale = this.sales.find(s => s.id == this.creditNoteForm.sale_id);
+                    if (this.selectedSale) {
+                        this.creditNoteForm.currency = this.selectedSale.receipt_currency || 'USD';
+                        this.creditNoteForm.selectedLines = [];
+                        // Initialize lineQuantities with original quantities
+                        this.creditNoteForm.lineQuantities = this.selectedSale.receipt_lines.map(line => 
+                            parseFloat(line.receiptLineQuantity || 0)
+                        );
+                        console.log('Selected Sale:', this.selectedSale);
+                        console.log('Receipt Lines:', this.selectedSale.receipt_lines);
+                    }
+                },
+
+                calculateLineCredit(index) {
+                    if (!this.selectedSale || !this.selectedSale.receipt_lines[index]) return 0;
+                    
+                    const line = this.selectedSale.receipt_lines[index];
+                    const creditQty = this.creditNoteForm.lineQuantities[index] || 0;
+                    const price = parseFloat(line.receiptLinePrice || 0);
+                    
+                    return Math.abs(creditQty * price);
+                },
+
+                calculateCreditTotal() {
+                    if (!this.selectedSale || !this.selectedSale.receipt_lines) return 0;
+                    
+                    return this.selectedSale.receipt_lines.reduce((sum, line, index) => {
+                        if (this.creditNoteForm.selectedLines[index]) {
+                            return sum + this.calculateLineCredit(index);
+                        }
+                        return sum;
+                    }, 0);
+                },
+
+                async submitCreditNote() {
+                    if (!this.creditNoteForm.sale_id) {
+                        this.showMessage('Please select a sale', 'error');
+                        return;
+                    }
+
+                    if (!this.creditNoteForm.reason) {
+                        this.showMessage('Please enter a reason', 'error');
+                        return;
+                    }
+
+                    const selectedLinesCount = this.creditNoteForm.selectedLines.filter(Boolean).length;
+                    if (selectedLinesCount === 0) {
+                        this.showMessage('Please select at least one product to credit', 'error');
+                        return;
+                    }
+                    
+                    // Validate receiptNotes minimum length (RCPT032)
+                    const reason = this.creditNoteForm.reason.trim();
+                    if (reason.length < 10) {
+                        this.showMessage('Credit note reason must be at least 10 characters (meaningful business reason required)', 'error');
+                        return;
+                    }
+
+                    this.loading = true;
+                    this.creditNoteResponse = null;
+
+                    try {
+                        // Build selected lines with custom quantities
+                        const selectedLines = [];
+                        this.creditNoteForm.selectedLines.forEach((selected, index) => {
+                            if (selected) {
+                                selectedLines.push({
+                                    line_index: index,
+                                    quantity: this.creditNoteForm.lineQuantities[index] || 0
+                                });
+                            }
+                        });
+
+                        // Use the production-safe BCMath endpoint
+                        // Backend will calculate all totals and ensure payment matches receipt total
+                        const payload = {
+                            original_receipt_id: this.selectedSale.id,
+                            selected_lines: selectedLines,
+                            reason: this.creditNoteForm.reason,
+                            payment_method: this.selectedSale.payment_method || 'Cash'
+                        };
+
+                        console.log('Submitting Credit Note (BCMath):', payload);
+
+                        const res = await fetch('/zimra/submit-credit-note', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                            },
+                            body: JSON.stringify(payload)
+                        });
+
+                        const data = await res.json();
+
+                        if (res.ok && !data.error) {
+                            this.showMessage('Credit note submitted successfully!', 'success');
+                            this.creditNoteResponse = data;
+                            // Reset form
+                            this.creditNoteForm = {
+                                sale_id: '',
+                                currency: 'USD',
+                                reason: '',
+                                selectedLines: [],
+                                lineQuantities: []
+                            };
+                            this.selectedSale = null;
+                            await this.loadSales();
+                        } else {
+                            this.showMessage(data.error || data.message || 'Failed to submit credit note', 'error');
+                            this.creditNoteResponse = data;
+                        }
+                    } catch (e) {
+                        this.showMessage('An error occurred: ' + e.message, 'error');
+                        this.creditNoteResponse = { error: true, message: e.message };
+                    }
+                    this.loading = false;
                 }
             };
         }

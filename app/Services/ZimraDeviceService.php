@@ -2495,6 +2495,15 @@ class ZimraDeviceService
                 );
                 $salesAmountWithTax = bcadd($lineTotal, $taxAmount, 2);
             }
+            
+            // CRITICAL: Normalize zero values to prevent "-0.00" (RCPT015)
+            // ZIMRA rejects "-0.00" for tax amounts, especially for 0% tax on credit notes
+            if (bccomp($taxAmount, '0', 2) === 0) {
+                $taxAmount = '0.00';
+            }
+            if (bccomp($salesAmountWithTax, '0', 2) === 0) {
+                $salesAmountWithTax = '0.00';
+            }
 
             // CRITICAL: Build line with EXACT CANONICAL ORDER per FDMS API specification
             // Order from FDMS spec: receiptLineType, receiptLineNo, receiptLineHSCode (if VAT),
@@ -2512,11 +2521,15 @@ class ZimraDeviceService
             }
             
             $line['receiptLineName'] = $originalLineName;
-            $line['receiptLinePrice'] = number_format((float) bcadd($priceRounded, '0', 2), 2, '.', '');
-            $line['receiptLineQuantity'] = number_format((float) bcadd($quantityRounded, '0', 6), 6, '.', '');
-            $line['receiptLineTotal'] = number_format((float) bcadd($lineTotal, '0', 2), 2, '.', '');
-            $line['taxCode'] = $taxCode !== null && $taxCode !== '' ? $taxCode : null;
-            $line['taxPercent'] = number_format((float) bcadd($taxPercent, '0', 2), 2, '.', '');
+            // CRITICAL: FDMS expects numeric types, not strings
+            $line['receiptLinePrice'] = (float) number_format((float) bcadd($priceRounded, '0', 2), 2, '.', '');
+            $line['receiptLineQuantity'] = (float) number_format((float) bcadd($quantityRounded, '0', 2), 2, '.', '');
+            $line['receiptLineTotal'] = (float) number_format((float) bcadd($lineTotal, '0', 2), 2, '.', '');
+            // CRITICAL: Only include taxCode if it has a value (FDMS rejects null)
+            if ($taxCode !== null && $taxCode !== '') {
+                $line['taxCode'] = $taxCode;
+            }
+            $line['taxPercent'] = (float) number_format((float) bcadd($taxPercent, '0', 2), 2, '.', '');
             $line['taxID'] = (int) $taxID;
             
             // Log canonical field order for verification
@@ -2529,12 +2542,15 @@ class ZimraDeviceService
             $taxKey = (string) $taxID;
             if (!isset($taxTotals[$taxKey])) {
                 $taxTotals[$taxKey] = [
-                    'taxCode' => $taxCode !== null && $taxCode !== '' ? $taxCode : null,
                     'taxPercent' => number_format((float) bcadd($taxPercent, '0', 2), 2, '.', ''),
                     'taxID' => (int) $taxID,
                     'taxAmount' => '0.00',
                     'salesAmountWithTax' => '0.00',
                 ];
+                // Only include taxCode if it has a value
+                if ($taxCode !== null && $taxCode !== '') {
+                    $taxTotals[$taxKey]['taxCode'] = $taxCode;
+                }
             }
             $taxTotals[$taxKey]['taxAmount'] = bcadd($taxTotals[$taxKey]['taxAmount'], $taxAmount, 2);
             $taxTotals[$taxKey]['salesAmountWithTax'] = bcadd($taxTotals[$taxKey]['salesAmountWithTax'], $salesAmountWithTax, 2);
@@ -2563,13 +2579,27 @@ class ZimraDeviceService
         // Convert tax totals to numeric values with 2 decimal precision
         $formattedTaxes = [];
         foreach ($taxTotals as $tax) {
-            $taxEntry = [
-                'taxCode' => isset($tax['taxCode']) && $tax['taxCode'] !== null && $tax['taxCode'] !== '' ? $tax['taxCode'] : null,
-                'taxPercent' => number_format((float) bcadd($tax['taxPercent'], '0', 2), 2, '.', ''),
-                'taxID' => (int) $tax['taxID'],
-                'taxAmount' => number_format((float) bcadd($tax['taxAmount'], '0', 2), 2, '.', ''),
-                'salesAmountWithTax' => number_format((float) bcadd($tax['salesAmountWithTax'], '0', 2), 2, '.', ''),
-            ];
+            // CRITICAL: Normalize zero values to prevent "-0.00" (RCPT015)
+            $taxAmount = $tax['taxAmount'];
+            $salesAmountWithTax = $tax['salesAmountWithTax'];
+            
+            if (bccomp($taxAmount, '0', 2) === 0) {
+                $taxAmount = '0.00';
+            }
+            if (bccomp($salesAmountWithTax, '0', 2) === 0) {
+                $salesAmountWithTax = '0.00';
+            }
+            
+            $taxEntry = [];
+            // CRITICAL: Only include taxCode if it has a value (FDMS rejects null)
+            if (isset($tax['taxCode']) && $tax['taxCode'] !== null && $tax['taxCode'] !== '') {
+                $taxEntry['taxCode'] = $tax['taxCode'];
+            }
+            // CRITICAL: FDMS expects numeric types, not strings
+            $taxEntry['taxPercent'] = (float) number_format((float) bcadd($tax['taxPercent'], '0', 2), 2, '.', '');
+            $taxEntry['taxID'] = (int) $tax['taxID'];
+            $taxEntry['taxAmount'] = (float) number_format((float) bcadd($taxAmount, '0', 2), 2, '.', '');
+            $taxEntry['salesAmountWithTax'] = (float) number_format((float) bcadd($salesAmountWithTax, '0', 2), 2, '.', '');
             
             $formattedTaxes[] = $taxEntry;
         }
@@ -2577,8 +2607,8 @@ class ZimraDeviceService
         // FDMS requires receiptTaxes even for non-VAT devices
         $receiptData['receiptTaxes'] = $formattedTaxes;
 
-        // Set receipt total as string with exact 2 decimal precision
-        $receiptData['receiptTotal'] = number_format((float) bcadd($calculatedReceiptTotal, '0', 2), 2, '.', '');
+        // Set receipt total as numeric type with exact 2 decimal precision
+        $receiptData['receiptTotal'] = (float) number_format((float) bcadd($calculatedReceiptTotal, '0', 2), 2, '.', '');
 
         Log::debug('Receipt Tax Totals (BCMath)', [
             'taxes' => $formattedTaxes,
@@ -2595,11 +2625,24 @@ class ZimraDeviceService
 
         foreach ($payments as &$payment) {
             $paymentAmount = $this->bcFormat($payment['paymentAmount'] ?? '0');
-            // Convert to string with exact 2 decimal precision
-            $payment['paymentAmount'] = number_format((float) bcadd($this->bcRound($paymentAmount, 2), '0', 2), 2, '.', '');
+            // CRITICAL: FDMS expects numeric types, not strings
+            $payment['paymentAmount'] = (float) number_format((float) bcadd($this->bcRound($paymentAmount, 2), '0', 2), 2, '.', '');
             $totalPayments = bcadd($totalPayments, $paymentAmount, 2);
         }
         unset($payment);
+        
+        // Auto-fill payment if empty or total is zero
+        if (empty($payments) || bccomp($totalPayments, '0.00', 2) === 0) {
+            $payments = [
+                [
+                    'moneyTypeCode' => 'Cash',
+                    // CRITICAL: FDMS expects numeric types, not strings
+                    'paymentAmount' => (float) number_format((float) bcadd($calculatedReceiptTotal, '0', 2), 2, '.', ''),
+                ]
+            ];
+            $totalPayments = $calculatedReceiptTotal;
+        }
+        
         $receiptData['receiptPayments'] = $payments;
 
         Log::debug('Receipt Payments Validation (BCMath)', [
@@ -3817,7 +3860,8 @@ private function validateReceiptTotals(array $receipt): void
 
         if (isset($receiptData['receiptTaxes']) && is_array($receiptData['receiptTaxes'])) {
             foreach ($receiptData['receiptTaxes'] as $tax) {
-                $key = $tax['taxCode'] . '_' . ($tax['taxPercent'] ?? 0);
+                $taxCode = $tax['taxCode'] ?? '';
+                $key = $taxCode . '_' . ($tax['taxPercent'] ?? 0);
 
                 if (!isset($counters[$key])) {
                     // SaleByTax counters must NOT include fiscalCounterMoneyType per ZIMRA FDMS v7.2

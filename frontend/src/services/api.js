@@ -135,8 +135,8 @@ export const debitNoteApi = {
 export const creditNoteApi = {
   search: (query = '*', limit = 50, skip = 0) =>
     api.post('/credit-note/search', { data: { query, limit, skip } }),
-  create: (data) =>
-    api.post('/credit-note/create', { data }),
+  create: (payload) =>
+    api.post('/credit-note/create', payload),
   delete: (data) =>
     api.post('/credit-note/delete', { data }),
   download: (id) =>
