@@ -4,7 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ZimraController;
 
 Route::get('/', function () {
-    return view('welcome');
+    return redirect('/zimra');
 });
 
 Route::get('/zimra', function () {
