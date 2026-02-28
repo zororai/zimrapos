@@ -519,17 +519,18 @@
                                                 <span>Open Fiscal Day</span>
                                             </button>
                                         </template>
-                                        <!-- Show Close Day button when FDMS status IS FiscalDayOpened -->
-                                        <template x-if="deviceStatus?.fiscalDayStatus === 'FiscalDayOpened'">
+                                        <!-- Show Close Day button when FDMS status is FiscalDayOpened OR FiscalDayCloseFailed -->
+                                        <!-- Button remains visible until both FDMS and local DB are synced -->
+                                        <template x-if="deviceStatus?.fiscalDayStatus === 'FiscalDayOpened' || deviceStatus?.fiscalDayStatus === 'FiscalDayCloseFailed'">
                                             <div class="flex space-x-2">
                                                 <button @click="closeFiscalDay()" :disabled="loading" class="px-4 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center space-x-2">
                                                     <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
                                                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                                                     </svg>
-                                                    <span>Close Fiscal Day</span>
+                                                    <span x-text="deviceStatus?.fiscalDayStatus === 'FiscalDayCloseFailed' ? 'Retry Close Day' : 'Close Fiscal Day'"></span>
                                                 </button>
-                                                <button x-show="closeDayFailed" @click="forceCloseFiscalDay()" :disabled="loading" class="px-4 py-2 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 disabled:opacity-50 flex items-center space-x-2" title="Force close locally without ZIMRA API">
+                                                <button x-show="closeDayFailed || deviceStatus?.fiscalDayStatus === 'FiscalDayCloseFailed'" @click="forceCloseFiscalDay()" :disabled="loading" class="px-4 py-2 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 disabled:opacity-50 flex items-center space-x-2" title="Force close locally without ZIMRA API">
                                                     <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
                                                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>

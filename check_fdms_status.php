@@ -5,11 +5,11 @@ require __DIR__.'/vendor/autoload.php';
 $app = require_once __DIR__.'/bootstrap/app.php';
 $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 
-// Get FDMS status for device 32857
+// Get FDMS status for device 32558 (ACTIVE device)
 $zimraService = app(\App\Services\ZimraDeviceService::class);
 
 try {
-    $status = $zimraService->getStatus(32857);
+    $status = $zimraService->getStatus(32558);
     
     echo "FDMS Device Status:\n";
     echo "==================\n";

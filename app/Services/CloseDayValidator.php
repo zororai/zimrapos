@@ -145,10 +145,10 @@ class CloseDayValidator
             return (float) $receipt->receipt_total;
         });
 
-        // Sum all SaleByTax counters
+        // Sum all sales-related counters (SaleByTax + CreditNoteByTax + DebitNoteByTax)
         $totalSalesByTax = 0;
         foreach ($payload['fiscalDayCounters'] as $counter) {
-            if ($counter['fiscalCounterType'] === 'SaleByTax') {
+            if (in_array($counter['fiscalCounterType'], ['SaleByTax', 'CreditNoteByTax', 'DebitNoteByTax'])) {
                 $totalSalesByTax += $counter['fiscalCounterValue'];
             }
         }
@@ -158,7 +158,7 @@ class CloseDayValidator
 
         // Allow 1 cent tolerance for rounding
         if (abs($totalSalesByTax - $totalReceiptValue) > 0.01) {
-            $errors[] = "Fiscal counter total mismatch: SalesByTax = {$totalSalesByTax}, Receipt Total = {$totalReceiptValue}, Difference = " . ($totalSalesByTax - $totalReceiptValue);
+            $errors[] = "Fiscal counter total mismatch: Sales counters = {$totalSalesByTax}, Receipt Total = {$totalReceiptValue}, Difference = " . ($totalSalesByTax - $totalReceiptValue);
         }
 
         return $errors;

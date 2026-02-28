@@ -945,11 +945,15 @@ class ZimraDeviceService
                 $finalStatus = 'failed';
                 Log::error('ZIMRA CloseDay - Close failed after polling', [
                     'error_code' => $statusResponse['fiscalDayClosingErrorCode'] ?? 'unknown',
+                    'fiscal_day_no' => $fiscalDay->fiscal_day_no,
                 ]);
+                
+                // CRITICAL: Do NOT update local status to 'closed' when FDMS reports failure
+                // Keep status as 'open' to allow retry
                 return [
                     'error' => true,
                     'message' => 'Fiscal day close failed: ' . ($statusResponse['fiscalDayClosingErrorCode'] ?? 'unknown'),
-                    'zimra_status' => $statusResponse,
+                    'body' => $statusResponse,
                 ];
             }
 
@@ -961,7 +965,23 @@ class ZimraDeviceService
             }
         }
 
-        // Update database
+        // CRITICAL: Only update database to 'closed' if FDMS confirmed success
+        if ($finalStatus !== 'closed') {
+            Log::error('ZIMRA CloseDay - Polling timeout without confirmation', [
+                'fiscal_day_no' => $fiscalDay->fiscal_day_no,
+                'final_status' => $finalStatus,
+                'attempts' => $maxAttempts,
+            ]);
+            
+            // Keep status as 'open' to allow retry
+            return [
+                'error' => true,
+                'message' => 'CloseDay polling timeout. FDMS did not confirm closure. Status remains open for retry.',
+                'body' => ['detail' => 'Polling timeout after ' . $maxAttempts . ' attempts'],
+            ];
+        }
+
+        // Update database only when FDMS confirms FiscalDayClosed
         $fiscalDay->update([
             'status' => 'closed',
             'closed_at' => now(),
@@ -1103,6 +1123,7 @@ class ZimraDeviceService
             $receiptTaxes = $receipt->receipt_taxes ?? [];
             $receiptPayments = $receipt->receipt_payments ?? [];
             $receiptTotal = (float) $receipt->receipt_total;
+            $receiptType = $receipt->receipt_type ?? 'FiscalInvoice';
             $currency = $receipt->receipt_currency ?? 'USD';
 
             // Convert to cents for integer-safe arithmetic
@@ -1111,31 +1132,42 @@ class ZimraDeviceService
 
             /*
             |----------------------------------------------------------------------
-            | A) SaleByTax Counters
+            | A) SaleByTax / CreditNoteByTax / DebitNoteByTax Counters
             |----------------------------------------------------------------------
+            | Per FDMS spec Section 6:
+            | - FiscalInvoice → SaleByTax
+            | - CreditNote → CreditNoteByTax (with negative values)
+            | - DebitNote → DebitNoteByTax
+            | 
             | Group by: currency, taxID, taxPercent
             | Value: salesAmountWithTax
-            | 
-            | CRITICAL: Tax is determined by LINE ITEMS, not payment method.
-            | Do NOT include fiscalCounterMoneyType in SaleByTax.
             |----------------------------------------------------------------------
             */
+            // Determine counter type based on receipt type
+            $salesCounterType = 'SaleByTax';
+            if ($receiptType === 'CreditNote') {
+                $salesCounterType = 'CreditNoteByTax';
+            } elseif ($receiptType === 'DebitNote') {
+                $salesCounterType = 'DebitNoteByTax';
+            }
+
             foreach ($receiptTaxes as $tax) {
                 $taxPercent = (float) ($tax['taxPercent'] ?? 0);
                 $taxID = (int) ($tax['taxID'] ?? 1);
                 $salesAmountWithTax = (float) ($tax['salesAmountWithTax'] ?? 0);
                 $salesAmountCents = (int) round($salesAmountWithTax * 100);
 
-                if ($salesAmountCents <= 0) {
-                    continue; // Skip zero-value counters
+                // Skip if exactly zero (not negative)
+                if ($salesAmountCents == 0) {
+                    continue;
                 }
 
-                // Create unique key: Type_Currency_TaxID_TaxPercent (NO moneyType)
-                $taxKey = "SaleByTax_{$currency}_{$taxID}_" . number_format($taxPercent, 2, '_', '');
+                // Create unique key: Type_Currency_TaxID_TaxPercent
+                $taxKey = "{$salesCounterType}_{$currency}_{$taxID}_" . number_format($taxPercent, 2, '_', '');
                 
                 if (!isset($counters[$taxKey])) {
                     $counters[$taxKey] = [
-                        'fiscalCounterType' => 'SaleByTax',
+                        'fiscalCounterType' => $salesCounterType,
                         'fiscalCounterCurrency' => $currency,
                         'fiscalCounterTaxPercent' => $taxPercent,
                         'fiscalCounterTaxID' => $taxID,
@@ -1147,28 +1179,42 @@ class ZimraDeviceService
 
             /*
             |----------------------------------------------------------------------
-            | B) SaleTaxByTax Counters
+            | B) SaleTaxByTax / CreditNoteTaxByTax / DebitNoteTaxByTax Counters
             |----------------------------------------------------------------------
+            | Per FDMS spec Section 6:
+            | - FiscalInvoice → SaleTaxByTax
+            | - CreditNote → CreditNoteTaxByTax (with negative values)
+            | - DebitNote → DebitNoteTaxByTax
+            | 
             | Group by: currency, taxID, taxPercent
             | Value: taxAmount from receiptTaxes
             |----------------------------------------------------------------------
             */
+            // Determine counter type based on receipt type
+            $taxCounterType = 'SaleTaxByTax';
+            if ($receiptType === 'CreditNote') {
+                $taxCounterType = 'CreditNoteTaxByTax';
+            } elseif ($receiptType === 'DebitNote') {
+                $taxCounterType = 'DebitNoteTaxByTax';
+            }
+
             foreach ($receiptTaxes as $tax) {
                 $taxPercent = (float) ($tax['taxPercent'] ?? 0);
                 $taxID = (int) ($tax['taxID'] ?? 1);
                 $taxAmount = (float) ($tax['taxAmount'] ?? 0);
                 $taxAmountCents = (int) round($taxAmount * 100);
 
-                if ($taxAmountCents <= 0) {
-                    continue; // Skip zero-value counters
+                // Skip if exactly zero (not negative)
+                if ($taxAmountCents == 0) {
+                    continue;
                 }
 
-                // Create unique key: Type_Currency_TaxID_TaxPercent (NO moneyType)
-                $saleTaxKey = "SaleTaxByTax_{$currency}_{$taxID}_" . number_format($taxPercent, 2, '_', '');
+                // Create unique key: Type_Currency_TaxID_TaxPercent
+                $saleTaxKey = "{$taxCounterType}_{$currency}_{$taxID}_" . number_format($taxPercent, 2, '_', '');
                 
                 if (!isset($counters[$saleTaxKey])) {
                     $counters[$saleTaxKey] = [
-                        'fiscalCounterType' => 'SaleTaxByTax',
+                        'fiscalCounterType' => $taxCounterType,
                         'fiscalCounterCurrency' => $currency,
                         'fiscalCounterTaxPercent' => $taxPercent,
                         'fiscalCounterTaxID' => $taxID,
@@ -1193,7 +1239,9 @@ class ZimraDeviceService
                 $paymentAmount = (float) ($payment['paymentAmount'] ?? 0);
                 $paymentAmountCents = (int) round($paymentAmount * 100);
 
-                if ($paymentAmountCents <= 0) {
+                // CRITICAL: Include credit notes (negative values) in counter aggregation
+                // Only skip if exactly zero (not negative)
+                if ($paymentAmountCents == 0) {
                     continue;
                 }
 
@@ -1219,8 +1267,9 @@ class ZimraDeviceService
         unset($counter);
 
         // Filter out zero-value counters (v7.2 requirement)
+        // CRITICAL: Keep negative values (credit notes), only filter exactly zero
         $filteredCounters = array_filter($counters, function ($c) {
-            return $c['fiscalCounterValue'] > 0;
+            return $c['fiscalCounterValue'] != 0;
         });
 
         // v7.2 SPEC: Field name is 'fiscalDayCounters' per Section 13.3.1
@@ -1236,9 +1285,9 @@ class ZimraDeviceService
         $totalBalanceByMoneyType = 0;
 
         foreach ($fiscalCounters as $counter) {
-            if ($counter['fiscalCounterType'] === 'SaleByTax') {
+            if (in_array($counter['fiscalCounterType'], ['SaleByTax', 'CreditNoteByTax', 'DebitNoteByTax'])) {
                 $totalSalesByTax += $counter['fiscalCounterValue'];
-            } elseif ($counter['fiscalCounterType'] === 'SaleTaxByTax') {
+            } elseif (in_array($counter['fiscalCounterType'], ['SaleTaxByTax', 'CreditNoteTaxByTax', 'DebitNoteTaxByTax'])) {
                 $totalSaleTaxByTax += $counter['fiscalCounterValue'];
             } elseif ($counter['fiscalCounterType'] === 'BalanceByMoneyType') {
                 $totalBalanceByMoneyType += $counter['fiscalCounterValue'];
