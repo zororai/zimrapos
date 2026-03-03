@@ -161,6 +161,12 @@
                     <button @click="activeTab = 'creditnotes'; loadSales()" class="px-6 py-4 text-sm font-medium border-b-2 transition-colors" :class="activeTab === 'creditnotes' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
                         Credit Notes
                     </button>
+                    <button @click="activeTab = 'debitnotes'; loadInvoices()" class="px-6 py-4 text-sm font-medium border-b-2 transition-colors" :class="activeTab === 'debitnotes' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
+                        Debit Notes
+                    </button>
+                    <button @click="activeTab = 'taxes'; loadTaxes()" class="px-6 py-4 text-sm font-medium border-b-2 transition-colors" :class="activeTab === 'taxes' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
+                        Tax Management
+                    </button>
                     <button @click="activeTab = 'submitfile'" class="px-6 py-4 text-sm font-medium border-b-2 transition-colors" :class="activeTab === 'submitfile' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
                         Submit File
                     </button>
@@ -834,6 +840,7 @@
                                     <table class="min-w-full divide-y divide-gray-200">
                                         <thead class="bg-gray-50">
                                             <tr>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
                                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invoice</th>
                                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
@@ -846,6 +853,16 @@
                                         <tbody class="bg-white divide-y divide-gray-200">
                                             <template x-for="receipt in receipts" :key="receipt.id">
                                                 <tr :class="{ 'bg-red-50': receipt.has_red_errors, 'bg-yellow-50': receipt.has_gray_errors && !receipt.has_red_errors }">
+                                                    <td class="px-4 py-3 text-sm">
+                                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium" 
+                                                              :class="{
+                                                                  'bg-blue-100 text-blue-800': receipt.receipt_type === 'FiscalInvoice',
+                                                                  'bg-purple-100 text-purple-800': receipt.receipt_type === 'CreditNote',
+                                                                  'bg-orange-100 text-orange-800': receipt.receipt_type === 'DebitNote'
+                                                              }"
+                                                              x-text="receipt.receipt_type === 'FiscalInvoice' ? 'Invoice' : receipt.receipt_type === 'CreditNote' ? 'Credit Note' : receipt.receipt_type === 'DebitNote' ? 'Debit Note' : receipt.receipt_type">
+                                                        </span>
+                                                    </td>
                                                     <td class="px-4 py-3 text-sm font-medium text-gray-900" x-text="receipt.invoice_no"></td>
                                                     <td class="px-4 py-3 text-sm text-gray-500" x-text="new Date(receipt.receipt_date).toLocaleDateString()"></td>
                                                     <td class="px-4 py-3 text-sm text-gray-900" x-text="receipt.receipt_currency + ' ' + parseFloat(receipt.receipt_total).toFixed(2)"></td>
@@ -1052,6 +1069,137 @@
                     </template>
                 </div>
 
+                <!-- Debit Notes Tab -->
+                <div x-show="activeTab === 'debitnotes'" x-cloak>
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold text-gray-900">Create Debit Note</h2>
+                        <button @click="loadInvoices()" class="text-sm text-green-600 hover:text-green-700 flex items-center space-x-1">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                            <span>Refresh Invoices</span>
+                        </button>
+                    </div>
+
+                    <template x-if="!config?.device_id">
+                        <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800">
+                            Please register a device first before creating debit notes.
+                        </div>
+                    </template>
+
+                    <template x-if="config?.device_id">
+                        <div class="space-y-6">
+                            <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-sm">
+                                <strong>Debit Notes:</strong> Create a debit note to add additional charges to a previous invoice. 
+                                The debit note will be automatically submitted to ZIMRA and linked to the original receipt.
+                            </div>
+
+                            <form @submit.prevent="submitDebitNote()" class="space-y-4">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Select Original Invoice *</label>
+                                        <select x-model="debitNoteForm.invoice_id" @change="loadInvoiceDetails()" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" required>
+                                            <option value="">-- Select an invoice --</option>
+                                            <template x-for="invoice in invoices" :key="invoice.id">
+                                                <option :value="invoice.id" x-text="`${invoice.invoice_number} - USD ${parseFloat(invoice.total || 0).toFixed(2)} (${new Date(invoice.created_at).toLocaleDateString()})`"></option>
+                                            </template>
+                                        </select>
+                                        <p class="text-xs text-gray-500 mt-1">Select the original invoice to debit</p>
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+                                        <input type="text" x-model="debitNoteForm.currency" class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50" readonly>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Reason for Debit Note *</label>
+                                    <textarea x-model="debitNoteForm.reason" rows="3" minlength="10" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="e.g., Additional charges - late payment fee (minimum 10 characters)" required></textarea>
+                                    <p class="text-xs text-gray-500 mt-1">
+                                        <span x-show="debitNoteForm.reason.length < 10" class="text-red-600 font-medium">
+                                            ⚠️ Minimum 10 characters required (<span x-text="debitNoteForm.reason.length"></span>/10)
+                                        </span>
+                                        <span x-show="debitNoteForm.reason.length >= 10" class="text-green-600">
+                                            ✓ Valid reason (<span x-text="debitNoteForm.reason.length"></span> characters)
+                                        </span>
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Additional Products/Charges</label>
+                                    <template x-if="selectedInvoice">
+                                        <div class="space-y-2">
+                                            <template x-for="(product, index) in selectedInvoice.products" :key="index">
+                                                <div class="p-3 bg-gray-50 rounded-lg">
+                                                    <div class="flex items-center space-x-3">
+                                                        <input type="checkbox" :id="'product-' + index" x-model="debitNoteForm.selectedProducts[index]" class="w-4 h-4 text-green-600">
+                                                        <label :for="'product-' + index" class="flex-1 text-sm">
+                                                            <span class="font-medium" x-text="product.name"></span>
+                                                            <span class="text-gray-600"> - Price: </span><span x-text="'USD ' + parseFloat(product.selling_price).toFixed(2)"></span>
+                                                        </label>
+                                                    </div>
+                                                    <div x-show="debitNoteForm.selectedProducts[index]" class="mt-2 ml-7 flex items-center space-x-3">
+                                                        <label class="text-xs text-gray-600">Debit Qty:</label>
+                                                        <input 
+                                                            type="number" 
+                                                            x-model.number="debitNoteForm.productQuantities[index]"
+                                                            min="0.01"
+                                                            step="0.01"
+                                                            class="w-24 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                                            placeholder="Qty">
+                                                        <span class="text-sm font-medium text-gray-700">
+                                                            = <span x-text="'USD ' + calculateProductDebit(index).toFixed(2)"></span>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                    <template x-if="!selectedInvoice">
+                                        <p class="text-sm text-gray-500 italic">Select an invoice to see products</p>
+                                    </template>
+                                </div>
+
+                                <div class="flex items-center justify-between pt-4 border-t border-gray-200">
+                                    <div class="text-lg">
+                                        <span class="text-gray-600">Debit Amount:</span>
+                                        <span class="font-bold text-green-600" x-text="debitNoteForm.currency + ' +' + calculateDebitTotal().toFixed(2)"></span>
+                                    </div>
+                                    <button type="submit" :disabled="loading || !debitNoteForm.invoice_id || calculateDebitTotal() === 0" class="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2">
+                                        <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                        </svg>
+                                        <span>Submit Debit Note to ZIMRA</span>
+                                    </button>
+                                </div>
+                            </form>
+
+                            <!-- Debit Note Response -->
+                            <template x-if="debitNoteResponse">
+                                <div class="p-4 rounded-lg" :class="debitNoteResponse.error ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'">
+                                    <h3 class="text-sm font-semibold mb-2" :class="debitNoteResponse.error ? 'text-red-800' : 'text-green-800'">
+                                        <span x-text="debitNoteResponse.error ? 'Debit Note Failed' : 'Debit Note Submitted Successfully'"></span>
+                                    </h3>
+                                    <div class="text-sm" :class="debitNoteResponse.error ? 'text-red-700' : 'text-green-700'">
+                                        <template x-if="!debitNoteResponse.error">
+                                            <div>
+                                                <p>Receipt ID: <strong x-text="debitNoteResponse.data?.receiptID"></strong></p>
+                                                <p>Server Date: <span x-text="debitNoteResponse.data?.serverDate"></span></p>
+                                                <p>Operation ID: <span x-text="debitNoteResponse.data?.operationID"></span></p>
+                                            </div>
+                                        </template>
+                                        <template x-if="debitNoteResponse.error">
+                                            <pre class="text-xs overflow-auto max-h-64 p-2 bg-white rounded mt-2" x-text="JSON.stringify(debitNoteResponse, null, 2)"></pre>
+                                        </template>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+
                 <!-- Submit File Tab -->
                 <div x-show="activeTab === 'submitfile'" x-cloak>
                     <h2 class="text-lg font-semibold text-gray-900 mb-4">Submit File to ZIMRA</h2>
@@ -1100,6 +1248,96 @@
                             </template>
                         </div>
                     </template>
+                </div>
+
+                <!-- Tax Management Tab -->
+                <div x-show="activeTab === 'taxes'" x-cloak>
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-semibold text-gray-900">Tax Management</h2>
+                        <button @click="showTaxForm = true; editingTax = null; resetTaxForm()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:ring-2 focus:ring-green-500 focus:ring-offset-2">
+                            + Add New Tax
+                        </button>
+                    </div>
+
+                    <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-sm mb-4">
+                        <strong>Note:</strong> Tax IDs are used in ZIMRA receipts. Make sure the ZIMRA Tax ID matches the tax configuration in your FDMS device.
+                    </div>
+
+                    <!-- Tax List -->
+                    <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ZIMRA Tax ID</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Code</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Percentage</th>
+                                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                <template x-if="taxes.length === 0">
+                                    <tr>
+                                        <td colspan="5" class="px-6 py-4 text-center text-gray-500">No taxes configured</td>
+                                    </tr>
+                                </template>
+                                <template x-for="tax in taxes" :key="tax.id">
+                                    <tr>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" x-text="tax.zimra_tax_id"></td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900" x-text="tax.name"></td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900" x-text="tax.code"></td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900" x-text="tax.percentage + '%'"></td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                                            <button @click="editTax(tax)" class="text-blue-600 hover:text-blue-900">Edit</button>
+                                            <button @click="deleteTax(tax.panier_id)" class="text-red-600 hover:text-red-900">Delete</button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tax Form Modal -->
+                    <div x-show="showTaxForm" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="showTaxForm = false">
+                        <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" x-text="editingTax ? 'Edit Tax' : 'Add New Tax'"></h3>
+                            
+                            <form @submit.prevent="saveTax()" class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">ZIMRA Tax ID *</label>
+                                    <input type="number" x-model="taxForm.zimra_tax_id" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="e.g., 515">
+                                    <p class="text-xs text-gray-500 mt-1">Must match the tax ID configured in your FDMS device</p>
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Tax Name *</label>
+                                    <input type="text" x-model="taxForm.name" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="e.g., Standard rated">
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Tax Code *</label>
+                                    <input type="text" x-model="taxForm.code" required maxlength="1" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="e.g., A">
+                                    <p class="text-xs text-gray-500 mt-1">Single character code (A, E, Z, W, etc.)</p>
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Percentage *</label>
+                                    <input type="number" step="0.01" x-model="taxForm.percentage" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="e.g., 15.5">
+                                    <p class="text-xs text-gray-500 mt-1">Tax percentage (e.g., 15.5 for 15.5%)</p>
+                                </div>
+
+                                <div class="flex items-center space-x-3 pt-4">
+                                    <button type="submit" :disabled="loading" class="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50">
+                                        <span x-show="!loading">Save Tax</span>
+                                        <span x-show="loading">Saving...</span>
+                                    </button>
+                                    <button type="button" @click="showTaxForm = false" class="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 focus:ring-2 focus:ring-gray-500 focus:ring-offset-2">
+                                        Cancel
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1191,12 +1429,35 @@
                 },
                 creditNoteResponse: null,
                 
+                // Debit Note form
+                invoices: [],
+                selectedInvoice: null,
+                debitNoteForm: {
+                    invoice_id: '',
+                    currency: 'USD',
+                    reason: '',
+                    selectedProducts: [],
+                    productQuantities: []
+                },
+                debitNoteResponse: null,
+                
                 // Tax configuration from FDMS
                 taxConfig: {
                     isVatRegistered: false,
                     vatNumber: null,
                     applicableTaxes: [],
                     message: ''
+                },
+
+                // Tax Management
+                taxes: [],
+                showTaxForm: false,
+                editingTax: null,
+                taxForm: {
+                    zimra_tax_id: '',
+                    name: '',
+                    code: '',
+                    percentage: ''
                 },
                 
                 async init() {
@@ -2101,9 +2362,250 @@
                     } catch (e) {
                         this.showMessage('An error occurred: ' + e.message, 'error');
                         this.creditNoteResponse = { error: true, message: e.message };
+                    } finally {
+                        this.loading = false;
                     }
-                    this.loading = false;
-                }
+                },
+
+                async loadInvoices() {
+                    try {
+                        const res = await fetch('/zimra/invoices');
+                        if (res.ok) {
+                            const data = await res.json();
+                            this.invoices = data.invoices || [];
+                            console.log('Loaded invoices:', this.invoices);
+                            if (this.invoices.length === 0) {
+                                this.showMessage('No invoices found. Please create an invoice first.', 'error');
+                            }
+                        } else {
+                            console.error('Failed to load invoices. Status:', res.status);
+                            this.showMessage('Failed to load invoices', 'error');
+                        }
+                    } catch (e) {
+                        console.error('Failed to load invoices:', e);
+                        this.showMessage('Error loading invoices: ' + e.message, 'error');
+                    }
+                },
+
+                loadInvoiceDetails() {
+                    this.selectedInvoice = this.invoices.find(inv => inv.id == this.debitNoteForm.invoice_id);
+                    if (this.selectedInvoice) {
+                        this.debitNoteForm.currency = 'USD';
+                        this.debitNoteForm.selectedProducts = [];
+                        this.debitNoteForm.productQuantities = (this.selectedInvoice.products || []).map(() => 1);
+                        console.log('Selected Invoice:', this.selectedInvoice);
+                    }
+                },
+
+                calculateProductDebit(index) {
+                    if (!this.selectedInvoice || !this.selectedInvoice.products[index]) return 0;
+                    
+                    const product = this.selectedInvoice.products[index];
+                    const debitQty = this.debitNoteForm.productQuantities[index] || 0;
+                    const price = parseFloat(product.selling_price || 0);
+                    
+                    return Math.abs(debitQty * price);
+                },
+
+                calculateDebitTotal() {
+                    if (!this.selectedInvoice || !this.selectedInvoice.products) return 0;
+                    
+                    return this.selectedInvoice.products.reduce((sum, product, index) => {
+                        if (this.debitNoteForm.selectedProducts[index]) {
+                            return sum + this.calculateProductDebit(index);
+                        }
+                        return sum;
+                    }, 0);
+                },
+
+                async submitDebitNote() {
+                    if (!this.debitNoteForm.invoice_id) {
+                        this.showMessage('Please select an invoice', 'error');
+                        return;
+                    }
+
+                    if (!this.debitNoteForm.reason) {
+                        this.showMessage('Please enter a reason', 'error');
+                        return;
+                    }
+
+                    const selectedProductsCount = this.debitNoteForm.selectedProducts.filter(Boolean).length;
+                    if (selectedProductsCount === 0) {
+                        this.showMessage('Please select at least one product to debit', 'error');
+                        return;
+                    }
+                    
+                    const reason = this.debitNoteForm.reason.trim();
+                    if (reason.length < 10) {
+                        this.showMessage('Debit note reason must be at least 10 characters', 'error');
+                        return;
+                    }
+
+                    this.loading = true;
+                    this.debitNoteResponse = null;
+
+                    try {
+                        const selectedProducts = [];
+                        this.debitNoteForm.selectedProducts.forEach((selected, index) => {
+                            if (selected && this.selectedInvoice.products[index]) {
+                                const product = this.selectedInvoice.products[index];
+                                selectedProducts.push({
+                                    id: product.id,
+                                    name: product.name,
+                                    selling_price: parseFloat(product.selling_price),
+                                    quantity: this.debitNoteForm.productQuantities[index] || 1
+                                });
+                            }
+                        });
+
+                        const payload = {
+                            data: [{
+                                invoice_id: this.debitNoteForm.invoice_id,
+                                products: selectedProducts,
+                                reason: this.debitNoteForm.reason
+                            }],
+                            zimra_fiscalize: true
+                        };
+
+                        console.log('Submitting Debit Note:', payload);
+
+                        const res = await fetch('/api/v1/debit-note/create', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                            },
+                            body: JSON.stringify(payload)
+                        });
+
+                        const data = await res.json();
+
+                        if (res.ok && !data.error) {
+                            this.showMessage('Debit note submitted successfully!', 'success');
+                            this.debitNoteResponse = { 
+                                data: data.created?.[0] || data,
+                                error: false 
+                            };
+                            this.debitNoteForm = {
+                                invoice_id: '',
+                                currency: 'USD',
+                                reason: '',
+                                selectedProducts: [],
+                                productQuantities: []
+                            };
+                            this.selectedInvoice = null;
+                            await this.loadInvoices();
+                        } else {
+                            this.showMessage(data.error || data.message || 'Failed to submit debit note', 'error');
+                            this.debitNoteResponse = data;
+                        }
+                    } catch (e) {
+                        this.showMessage('An error occurred: ' + e.message, 'error');
+                        this.debitNoteResponse = { error: true, message: e.message };
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Tax Management Methods
+                async loadTaxes() {
+                    try {
+                        const res = await fetch('/zimra/taxes');
+                        if (res.ok) {
+                            const data = await res.json();
+                            this.taxes = data.taxes || [];
+                            console.log('Loaded taxes:', this.taxes);
+                        }
+                    } catch (e) {
+                        console.error('Failed to load taxes:', e);
+                        this.showMessage('Failed to load taxes: ' + e.message, 'error');
+                    }
+                },
+
+                resetTaxForm() {
+                    this.taxForm = {
+                        zimra_tax_id: '',
+                        name: '',
+                        code: '',
+                        percentage: ''
+                    };
+                },
+
+                editTax(tax) {
+                    this.editingTax = tax;
+                    this.taxForm = {
+                        zimra_tax_id: tax.zimra_tax_id,
+                        name: tax.name,
+                        code: tax.code,
+                        percentage: tax.percentage
+                    };
+                    this.showTaxForm = true;
+                },
+
+                async saveTax() {
+                    this.loading = true;
+                    try {
+                        const url = this.editingTax ? '/zimra/taxes/update' : '/zimra/taxes/create';
+                        const payload = this.editingTax 
+                            ? { id: this.editingTax.panier_id, ...this.taxForm }
+                            : this.taxForm;
+
+                        const res = await fetch(url, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                            },
+                            body: JSON.stringify(payload)
+                        });
+
+                        const data = await res.json();
+
+                        if (res.ok && !data.error) {
+                            this.showMessage(this.editingTax ? 'Tax updated successfully!' : 'Tax created successfully!', 'success');
+                            this.showTaxForm = false;
+                            this.resetTaxForm();
+                            await this.loadTaxes();
+                        } else {
+                            this.showMessage(data.error || data.message || 'Failed to save tax', 'error');
+                        }
+                    } catch (e) {
+                        this.showMessage('An error occurred: ' + e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async deleteTax(taxId) {
+                    if (!confirm('Are you sure you want to delete this tax? This action cannot be undone.')) {
+                        return;
+                    }
+
+                    this.loading = true;
+                    try {
+                        const res = await fetch('/zimra/taxes/delete', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                            },
+                            body: JSON.stringify({ id: taxId })
+                        });
+
+                        const data = await res.json();
+
+                        if (res.ok && !data.error) {
+                            this.showMessage('Tax deleted successfully!', 'success');
+                            await this.loadTaxes();
+                        } else {
+                            this.showMessage(data.error || data.message || 'Failed to delete tax', 'error');
+                        }
+                    } catch (e) {
+                        this.showMessage('An error occurred: ' + e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
             };
         }
     </script>

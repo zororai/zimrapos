@@ -3,9 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Receipt - {{ $receipt->invoice_no }}</title>
-    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+    <title>{{ $receipt->receipt_type === 'CreditNote' ? 'Credit Note' : ($receipt->receipt_type === 'DebitNote' ? 'Debit Note' : 'Fiscal Tax Invoice') }} - {{ $receipt->invoice_no }}</title>
     <style>
+        @page {
+            margin: 15mm;
+        }
+        
         @media print {
             body { margin: 0; }
             .no-print { display: none !important; }
@@ -18,369 +21,324 @@
         }
         
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            font-size: 12px;
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 10pt;
             line-height: 1.4;
-            color: #333;
-            background: #f5f5f5;
+            color: #000;
+            background: #fff;
         }
         
         .receipt-container {
-            max-width: 400px;
-            margin: 20px auto;
+            max-width: 210mm;
+            margin: 0 auto;
             background: white;
-            padding: 30px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 10mm;
         }
         
         .header {
-            text-align: center;
-            border-bottom: 2px solid #333;
-            padding-bottom: 15px;
-            margin-bottom: 15px;
-        }
-        
-        .header h1 {
-            font-size: 18px;
-            margin-bottom: 5px;
-        }
-        
-        .header .subtitle {
-            font-size: 11px;
-            color: #666;
-        }
-        
-        .info-section {
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 1px dashed #ccc;
-        }
-        
-        .info-row {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 3px;
+            align-items: flex-start;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #000;
         }
         
-        .info-label {
-            color: #666;
+        .company-logo {
+            flex: 0 0 80px;
         }
         
-        .info-value {
-            font-weight: 600;
+        .company-logo img {
+            max-width: 80px;
+            max-height: 80px;
+        }
+        
+        .verification-section {
+            text-align: center;
+            margin-bottom: 15px;
+        }
+        
+        .verification-code {
+            font-size: 9pt;
+            color: #0066cc;
+            margin: 5px 0;
+        }
+        
+        .qr-code {
+            display: inline-block;
+            margin: 10px 0;
+        }
+        
+        .invoice-title {
+            text-align: center;
+            font-size: 14pt;
+            font-weight: bold;
+            margin: 15px 0;
+            text-transform: uppercase;
+        }
+        
+        .parties-section {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            gap: 20px;
+        }
+        
+        .party-box {
+            flex: 1;
+            border: 1px solid #000;
+            padding: 10px;
+        }
+        
+        .party-title {
+            font-weight: bold;
+            font-size: 10pt;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+        
+        .party-info {
+            font-size: 9pt;
+            line-height: 1.5;
+        }
+        
+        .invoice-details {
+            margin-bottom: 15px;
+        }
+        
+        .detail-row {
+            padding: 3px 0;
+            font-size: 9pt;
         }
         
         .items-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 15px;
+            margin: 15px 0;
+            font-size: 9pt;
         }
         
         .items-table th {
+            background: #f0f0f0;
+            border: 1px solid #000;
+            padding: 6px 4px;
             text-align: left;
-            padding: 8px 5px;
-            border-bottom: 1px solid #333;
-            font-size: 11px;
-            text-transform: uppercase;
+            font-weight: bold;
         }
         
         .items-table td {
-            padding: 8px 5px;
-            border-bottom: 1px dashed #ddd;
+            border: 1px solid #000;
+            padding: 6px 4px;
         }
         
         .items-table .text-right {
             text-align: right;
         }
         
-        .totals {
+        .items-table .text-center {
+            text-align: center;
+        }
+        
+        .totals-section {
             margin-top: 15px;
-            padding-top: 10px;
-            border-top: 2px solid #333;
+            text-align: right;
         }
         
         .total-row {
             display: flex;
-            justify-content: space-between;
-            margin-bottom: 5px;
+            justify-content: flex-end;
+            gap: 20px;
+            padding: 3px 0;
+            font-size: 10pt;
         }
         
         .total-row.grand-total {
-            font-size: 16px;
             font-weight: bold;
-            margin-top: 10px;
-            padding-top: 10px;
-            border-top: 1px solid #333;
+            font-size: 11pt;
+            border-top: 2px solid #000;
+            padding-top: 8px;
+            margin-top: 5px;
         }
         
-        .tax-info {
-            background: #f9f9f9;
-            padding: 10px;
-            margin: 15px 0;
-            border-radius: 5px;
-        }
-        
-        .tax-info h4 {
-            font-size: 11px;
-            text-transform: uppercase;
-            margin-bottom: 5px;
-            color: #666;
-        }
-        
-        .zimra-section {
-            background: #e8f5e9;
-            padding: 15px;
-            margin: 15px 0;
-            border-radius: 5px;
-            border-left: 4px solid #4caf50;
-        }
-        
-        .zimra-section h4 {
-            font-size: 12px;
-            color: #2e7d32;
-            margin-bottom: 10px;
-        }
-        
-        .zimra-section .info-row {
-            font-size: 10px;
-        }
-        
-        .signature-box {
-            background: #fff3e0;
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 5px;
-            word-break: break-all;
-            font-size: 9px;
-            font-family: monospace;
-        }
-        
-        .qr-placeholder {
-            text-align: center;
-            padding: 20px;
-            background: #f5f5f5;
-            border: 1px dashed #ccc;
-            margin: 15px 0;
-        }
-        
-        .footer {
-            text-align: center;
+        .footer-note {
             margin-top: 20px;
-            padding-top: 15px;
-            border-top: 1px solid #ddd;
-            font-size: 10px;
-            color: #666;
+            font-size: 8pt;
+            font-style: italic;
+            text-align: center;
         }
         
         .print-btn {
             display: block;
-            width: 100%;
-            padding: 15px;
-            background: #4caf50;
+            width: 200px;
+            margin: 20px auto;
+            padding: 12px;
+            background: #0066cc;
             color: white;
             border: none;
-            font-size: 14px;
+            font-size: 11pt;
             cursor: pointer;
-            margin-top: 20px;
-            border-radius: 5px;
+            text-align: center;
+            text-decoration: none;
         }
         
         .print-btn:hover {
-            background: #388e3c;
+            background: #0052a3;
         }
     </style>
 </head>
 <body>
     <div class="receipt-container">
+        @php
+            $config = \App\Models\ZimraConfig::where('device_id', $receipt->device_id)->first();
+            $companyName = $config->company_name ?? 'Company Name';
+            $companyTin = $config->company_tin ?? 'TIN Number';
+        @endphp
+        
         <div class="header">
-            <h1>FISCAL INVOICE</h1>
-            <div class="subtitle">ZIMRA Compliant Receipt</div>
-        </div>
-        
-        <div class="info-section">
-            <div class="info-row">
-                <span class="info-label">Invoice No:</span>
-                <span class="info-value">{{ $receipt->invoice_no }}</span>
+            <div class="company-logo">
+                <!-- Logo placeholder - add your company logo here -->
+                <div style="width: 60px; height: 60px; border: 1px solid #000; display: flex; align-items: center; justify-content: center; font-size: 8pt;">LOGO</div>
             </div>
-            <div class="info-row">
-                <span class="info-label">Date:</span>
-                <span class="info-value">{{ $receipt->receipt_date->format('d M Y H:i') }}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Receipt Type:</span>
-                <span class="info-value">{{ $receipt->receipt_type }}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Device ID:</span>
-                <span class="info-value">{{ $receipt->device_id }}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Fiscal Day:</span>
-                <span class="info-value">{{ $receipt->fiscal_day_no }}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Receipt Counter:</span>
-                <span class="info-value">{{ $receipt->receipt_counter }}</span>
+            <div class="verification-section" style="flex: 1; text-align: right;">
+                <div class="verification-code">
+                    <strong>Verification code</strong><br>
+                    @if($receipt->receipt_qr_code)
+                        {{ substr($receipt->receipt_qr_code, 0, 50) }}<br>
+                        <a href="{{ $receipt->receipt_qr_code }}" style="font-size: 8pt;">{{ $receipt->receipt_qr_code }}</a>
+                    @else
+                        Verification URL not available
+                    @endif
+                </div>
+                @if($receipt->receipt_qr_code)
+                <div class="qr-code" id="qrcode"></div>
+                @endif
             </div>
         </div>
         
-        @if($receipt->buyer_data)
-        <div class="info-section" style="background: #f0f8ff; padding: 10px; border-radius: 5px;">
-            <h4 style="font-size: 12px; margin-bottom: 8px; color: #1976d2;">CUSTOMER DETAILS</h4>
-            @if(isset($receipt->buyer_data['buyerRegisterName']))
-            <div class="info-row">
-                <span class="info-label">Name:</span>
-                <span class="info-value">{{ $receipt->buyer_data['buyerRegisterName'] }}</span>
-            </div>
-            @endif
-            @if(isset($receipt->buyer_data['buyerTradeName']))
-            <div class="info-row">
-                <span class="info-label">Trading Name:</span>
-                <span class="info-value">{{ $receipt->buyer_data['buyerTradeName'] }}</span>
-            </div>
-            @endif
-            @if(isset($receipt->buyer_data['vatNumber']))
-            <div class="info-row">
-                <span class="info-label">VAT Number:</span>
-                <span class="info-value">{{ $receipt->buyer_data['vatNumber'] }}</span>
-            </div>
-            @endif
-            @if(isset($receipt->buyer_data['buyerTIN']))
-            <div class="info-row">
-                <span class="info-label">TIN:</span>
-                <span class="info-value">{{ $receipt->buyer_data['buyerTIN'] }}</span>
-            </div>
-            @endif
-            @if(isset($receipt->buyer_data['buyerContacts']))
-                @if(isset($receipt->buyer_data['buyerContacts']['phoneNo']))
-                <div class="info-row">
-                    <span class="info-label">Phone:</span>
-                    <span class="info-value">{{ $receipt->buyer_data['buyerContacts']['phoneNo'] }}</span>
-                </div>
-                @endif
-                @if(isset($receipt->buyer_data['buyerContacts']['email']))
-                <div class="info-row">
-                    <span class="info-label">Email:</span>
-                    <span class="info-value">{{ $receipt->buyer_data['buyerContacts']['email'] }}</span>
-                </div>
-                @endif
-            @endif
-            @if(isset($receipt->buyer_data['buyerAddress']))
-                @php
-                    $address = [];
-                    if(isset($receipt->buyer_data['buyerAddress']['houseNo'])) $address[] = $receipt->buyer_data['buyerAddress']['houseNo'];
-                    if(isset($receipt->buyer_data['buyerAddress']['street'])) $address[] = $receipt->buyer_data['buyerAddress']['street'];
-                    if(isset($receipt->buyer_data['buyerAddress']['district'])) $address[] = $receipt->buyer_data['buyerAddress']['district'];
-                    if(isset($receipt->buyer_data['buyerAddress']['city'])) $address[] = $receipt->buyer_data['buyerAddress']['city'];
-                    if(isset($receipt->buyer_data['buyerAddress']['province'])) $address[] = $receipt->buyer_data['buyerAddress']['province'];
-                    $fullAddress = implode(', ', array_filter($address));
-                @endphp
-                @if($fullAddress)
-                <div class="info-row">
-                    <span class="info-label">Address:</span>
-                    <span class="info-value">{{ $fullAddress }}</span>
-                </div>
-                @endif
+        <div class="invoice-title">
+            @if($receipt->receipt_type === 'CreditNote')
+                FISCAL TAX CREDIT NOTE
+            @elseif($receipt->receipt_type === 'DebitNote')
+                FISCAL TAX DEBIT NOTE
+            @else
+                FISCAL TAX INVOICE
             @endif
         </div>
-        @endif
+        
+        <div class="parties-section">
+            <div class="party-box">
+                <div class="party-title">SELLER</div>
+                <div class="party-info">
+                    <strong>{{ $companyName }}</strong><br>
+                    TIN: {{ $companyTin }}<br>
+                    @if($config && $config->company_address)
+                        {{ $config->company_address }}<br>
+                    @endif
+                    Device ID: {{ $receipt->device_id }}
+                </div>
+            </div>
+            
+            <div class="party-box">
+                <div class="party-title">BUYER</div>
+                <div class="party-info">
+                    @if($receipt->buyer_data)
+                        @if(isset($receipt->buyer_data['buyerRegisterName']))
+                            <strong>{{ $receipt->buyer_data['buyerRegisterName'] }}</strong><br>
+                        @endif
+                        @if(isset($receipt->buyer_data['buyerTradeName']) && $receipt->buyer_data['buyerTradeName'] != $receipt->buyer_data['buyerRegisterName'])
+                            Trading as: {{ $receipt->buyer_data['buyerTradeName'] }}<br>
+                        @endif
+                        @if(isset($receipt->buyer_data['buyerTIN']))
+                            TIN: {{ $receipt->buyer_data['buyerTIN'] }}<br>
+                        @endif
+                        @if(isset($receipt->buyer_data['vatNumber']))
+                            VAT: {{ $receipt->buyer_data['vatNumber'] }}<br>
+                        @endif
+                        @if(isset($receipt->buyer_data['buyerAddress']))
+                            @php
+                                $address = [];
+                                if(isset($receipt->buyer_data['buyerAddress']['houseNo'])) $address[] = $receipt->buyer_data['buyerAddress']['houseNo'];
+                                if(isset($receipt->buyer_data['buyerAddress']['street'])) $address[] = $receipt->buyer_data['buyerAddress']['street'];
+                                if(isset($receipt->buyer_data['buyerAddress']['district'])) $address[] = $receipt->buyer_data['buyerAddress']['district'];
+                                if(isset($receipt->buyer_data['buyerAddress']['city'])) $address[] = $receipt->buyer_data['buyerAddress']['city'];
+                                $fullAddress = implode(', ', array_filter($address));
+                            @endphp
+                            @if($fullAddress)
+                                {{ $fullAddress }}<br>
+                            @endif
+                        @endif
+                        @if(isset($receipt->buyer_data['buyerContacts']['phoneNo']))
+                            Tel: {{ $receipt->buyer_data['buyerContacts']['phoneNo'] }}<br>
+                        @endif
+                        @if(isset($receipt->buyer_data['buyerContacts']['email']))
+                            Email: {{ $receipt->buyer_data['buyerContacts']['email'] }}
+                        @endif
+                    @else
+                        <em>Cash Customer</em>
+                    @endif
+                </div>
+            </div>
+        </div>
+        
+        <div class="invoice-details">
+            <div class="detail-row">Invoice No: <strong>{{ $receipt->invoice_no }}</strong></div>
+            <div class="detail-row">Date: <strong>{{ $receipt->receipt_date->format('d/m/Y H:i') }}</strong></div>
+            <div class="detail-row">Fiscal device ID: <strong>{{ $receipt->device_id }}</strong></div>
+            <div class="detail-row">Fiscal day No: <strong>{{ $receipt->fiscal_day_no }}</strong></div>
+        </div>
         
         <table class="items-table">
             <thead>
                 <tr>
-                    <th>Item</th>
-                    <th class="text-right">Qty</th>
-                    <th class="text-right">Price</th>
-                    <th class="text-right">Total</th>
+                    <th style="width: 8%;">Code</th>
+                    <th style="width: 40%;">Description</th>
+                    <th class="text-center" style="width: 8%;">Qty</th>
+                    <th class="text-right" style="width: 12%;">Price</th>
+                    <th class="text-right" style="width: 10%;">VAT</th>
+                    <th class="text-right" style="width: 22%;">Total amount<br>(incl. tax)</th>
                 </tr>
             </thead>
             <tbody>
-                @foreach($receipt->receipt_lines as $line)
+                @foreach($receipt->receipt_lines as $index => $line)
                 <tr>
+                    <td>{{ $line['receiptLineHSCode'] ?? ($index + 1) }}</td>
                     <td>{{ $line['receiptLineName'] ?? 'Item' }}</td>
-                    <td class="text-right">{{ $line['receiptLineQuantity'] ?? 1 }}</td>
-                    <td class="text-right">{{ $receipt->receipt_currency }} {{ number_format($line['receiptLinePrice'] ?? 0, 2) }}</td>
-                    <td class="text-right">{{ $receipt->receipt_currency }} {{ number_format($line['receiptLineTotal'] ?? 0, 2) }}</td>
+                    <td class="text-center">{{ $line['receiptLineQuantity'] ?? 1 }}</td>
+                    <td class="text-right">{{ number_format(abs($line['receiptLinePrice'] ?? 0), 2) }}</td>
+                    <td class="text-right">{{ number_format(abs(($line['receiptLineTotal'] ?? 0) - ($line['receiptLineTotal'] ?? 0) / (1 + ($receipt->tax_percent / 100))), 2) }}</td>
+                    <td class="text-right">{{ number_format(abs($line['receiptLineTotal'] ?? 0), 2) }}</td>
                 </tr>
                 @endforeach
             </tbody>
         </table>
         
-        <div class="tax-info">
-            <h4>Tax Information</h4>
-            <div class="info-row">
-                <span class="info-label">Tax Code:</span>
-                <span class="info-value">{{ $receipt->tax_code }} ({{ $receipt->tax_percent }}%)</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Tax Amount:</span>
-                <span class="info-value">{{ $receipt->receipt_currency }} {{ number_format($receipt->tax_amount, 2) }}</span>
-            </div>
-        </div>
-        
-        <div class="totals">
+        <div class="totals-section">
             <div class="total-row">
-                <span>Subtotal:</span>
-                <span>{{ $receipt->receipt_currency }} {{ number_format($receipt->receipt_total - $receipt->tax_amount, 2) }}</span>
-            </div>
-            <div class="total-row">
-                <span>VAT ({{ $receipt->tax_percent }}%):</span>
-                <span>{{ $receipt->receipt_currency }} {{ number_format($receipt->tax_amount, 2) }}</span>
+                <span>Total {{ $receipt->tax_percent }}% VAT:</span>
+                <span style="min-width: 100px; text-align: right;">{{ number_format(abs($receipt->tax_amount), 2) }}</span>
             </div>
             <div class="total-row grand-total">
-                <span>TOTAL:</span>
-                <span>{{ $receipt->receipt_currency }} {{ number_format($receipt->receipt_total, 2) }}</span>
+                <span>Invoice total, {{ $receipt->receipt_currency }}:</span>
+                <span style="min-width: 100px; text-align: right;">{{ number_format(abs($receipt->receipt_total), 2) }}</span>
             </div>
         </div>
         
-        <div class="info-section" style="margin-top: 15px;">
-            <div class="info-row">
-                <span class="info-label">Payment Method:</span>
-                <span class="info-value">{{ $receipt->payment_method }}</span>
-            </div>
-        </div>
-        
-        <div class="qr-code-section" style="text-align: center; margin: 20px 0;">
-            <h4 style="font-size: 11px; color: #666; margin-bottom: 10px;">SCAN TO VERIFY</h4>
-            <div id="qrcode" style="display: inline-block;"></div>
-            <p style="font-size: 9px; color: #888; margin-top: 5px; word-break: break-all;">
-                @if($receipt->receipt_qr_code)
-                    {{ $receipt->receipt_qr_code }}
-                @else
-                    QR not available - ensure getConfig was called
-                @endif
-            </p>
-        </div>
-        
-        <div class="footer">
-            <p>This is a fiscalized receipt registered with ZIMRA</p>
-            <p>Generated on {{ now()->format('d M Y H:i:s') }}</p>
-        </div>
-        
-        <div class="no-print" style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-            <button class="print-btn" onclick="window.print()">
-                Print / Save as PDF
-            </button>
-            @if($receipt->receipt_qr_code)
-            <a href="{{ $receipt->receipt_qr_code }}" target="_blank" class="print-btn" style="text-decoration: none; background: #2563eb;">
-                Verify on ZIMRA Portal
-            </a>
-            @endif
+        <div class="footer-note">
+            Invoice is issued after purchasing goods according to agreement No.555
         </div>
     </div>
     
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // ONLY use stored QR string - NO dynamic fallback
             var qrString = '{{ $receipt->receipt_qr_code ?? "" }}';
+            var qrElement = document.getElementById('qrcode');
             
-            if (qrString && typeof qrcode !== 'undefined') {
+            if (qrString && qrElement && typeof qrcode !== 'undefined') {
                 var qr = qrcode(0, 'M');
                 qr.addData(qrString);
                 qr.make();
-                document.getElementById('qrcode').innerHTML = qr.createImgTag(4);
-            } else {
-                document.getElementById('qrcode').innerHTML = '<p style="color:#999;font-size:10px;">QR not available - receipt was submitted before getConfig was called</p>';
+                qrElement.innerHTML = qr.createImgTag(3);
             }
         });
     </script>

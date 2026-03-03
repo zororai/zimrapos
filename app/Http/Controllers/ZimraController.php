@@ -679,18 +679,69 @@ class ZimraController extends Controller
 
     /*
     |--------------------------------------------------------------------------
+    | Get All Invoices (Panier invoices for debit notes)
+    |--------------------------------------------------------------------------
+    */
+    public function getInvoices()
+    {
+        $config = ZimraConfig::getActive();
+        
+        if (!$config || !$config->device_id) {
+            return response()->json(['invoices' => []]);
+        }
+
+        // Get ZIMRA receipts that are FiscalInvoice type (these are the "invoices")
+        // These can be used as the basis for creating debit notes
+        $receipts = Receipt::where('device_id', $config->device_id)
+            ->where('receipt_type', 'FiscalInvoice')
+            ->orderBy('created_at', 'desc')
+            ->limit(100)
+            ->get()
+            ->map(function($receipt) {
+                // Extract products from receipt_lines
+                $products = [];
+                if ($receipt->receipt_lines && is_array($receipt->receipt_lines)) {
+                    foreach ($receipt->receipt_lines as $line) {
+                        $products[] = [
+                            'id' => $line['receiptLineHSCode'] ?? 'PROD-' . uniqid(),
+                            'name' => $line['receiptLineName'] ?? 'Product',
+                            'selling_price' => abs($line['receiptLinePrice'] ?? 0),
+                            'quantity' => $line['receiptLineQuantity'] ?? 1,
+                        ];
+                    }
+                }
+                
+                return [
+                    'id' => $receipt->id,
+                    'invoice_number' => $receipt->invoice_no,
+                    'total' => abs($receipt->receipt_total ?? 0),
+                    'created_at' => $receipt->created_at,
+                    'products' => $products,
+                    'zimra_fiscalized' => true,
+                    'receipt_global_no' => $receipt->receipt_global_no,
+                    'receipt_date' => $receipt->receipt_date,
+                ];
+            });
+            
+        return response()->json(['invoices' => $receipts]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Download Receipt PDF
     |--------------------------------------------------------------------------
     */
     public function downloadReceiptPdf($id)
     {
         $receipt = Receipt::findOrFail($id);
-        $config = ZimraConfig::getActive();
         
-        return view('receipts.pdf', [
-            'receipt' => $receipt,
-            'config' => $config,
-        ]);
+        // Generate PDF using dompdf
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('receipts.pdf', ['receipt' => $receipt]);
+        
+        // Set paper size and orientation
+        $pdf->setPaper('a4', 'portrait');
+        
+        return $pdf->download('receipt-' . $receipt->invoice_no . '.pdf');
     }
 
     /*
@@ -864,6 +915,171 @@ class ZimraController extends Controller
                 'message' => 'Failed to fetch tax configuration: ' . $e->getMessage(),
                 'isVatRegistered' => false,
                 'applicableTaxes' => [],
+            ], 500);
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Get All Taxes
+    |--------------------------------------------------------------------------
+    */
+    public function getTaxes()
+    {
+        $taxes = \App\Models\PanierTax::orderBy('zimra_tax_id', 'asc')->get();
+        return response()->json(['taxes' => $taxes]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Create Tax
+    |--------------------------------------------------------------------------
+    */
+    public function createTax(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'zimra_tax_id' => 'required|integer|unique:panier_taxes,zimra_tax_id',
+                'name' => 'required|string|max:255',
+                'code' => 'required|string|max:1',
+                'percentage' => 'required|numeric|min:0|max:100',
+            ]);
+
+            $tax = \App\Models\PanierTax::create([
+                'panier_id' => \Illuminate\Support\Str::ulid()->toString(),
+                'zimra_tax_id' => $validated['zimra_tax_id'],
+                'name' => $validated['name'],
+                'code' => $validated['code'],
+                'percentage' => $validated['percentage'],
+                'panier_data' => $validated,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'tax' => $tax,
+                'message' => 'Tax created successfully'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'error' => true,
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => true,
+                'message' => 'Failed to create tax: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Update Tax
+    |--------------------------------------------------------------------------
+    */
+    public function updateTax(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'id' => 'required|string',
+                'zimra_tax_id' => 'required|integer',
+                'name' => 'required|string|max:255',
+                'code' => 'required|string|max:1',
+                'percentage' => 'required|numeric|min:0|max:100',
+            ]);
+
+            $tax = \App\Models\PanierTax::where('panier_id', $validated['id'])->first();
+            
+            if (!$tax) {
+                return response()->json([
+                    'error' => true,
+                    'message' => 'Tax not found'
+                ], 404);
+            }
+
+            // Check if zimra_tax_id is being changed to one that already exists
+            if ($tax->zimra_tax_id != $validated['zimra_tax_id']) {
+                $exists = \App\Models\PanierTax::where('zimra_tax_id', $validated['zimra_tax_id'])
+                    ->where('panier_id', '!=', $validated['id'])
+                    ->exists();
+                
+                if ($exists) {
+                    return response()->json([
+                        'error' => true,
+                        'message' => 'A tax with this ZIMRA Tax ID already exists'
+                    ], 422);
+                }
+            }
+
+            $tax->update([
+                'zimra_tax_id' => $validated['zimra_tax_id'],
+                'name' => $validated['name'],
+                'code' => $validated['code'],
+                'percentage' => $validated['percentage'],
+                'panier_data' => array_merge($tax->panier_data ?? [], $validated),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'tax' => $tax,
+                'message' => 'Tax updated successfully'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'error' => true,
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => true,
+                'message' => 'Failed to update tax: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Delete Tax
+    |--------------------------------------------------------------------------
+    */
+    public function deleteTax(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'id' => 'required|string',
+            ]);
+
+            $tax = \App\Models\PanierTax::where('panier_id', $validated['id'])->first();
+            
+            if (!$tax) {
+                return response()->json([
+                    'error' => true,
+                    'message' => 'Tax not found'
+                ], 404);
+            }
+
+            // Check if tax is being used by any products
+            $productsUsingTax = \App\Models\PanierProduct::where('applicable_tax_id', $tax->panier_id)->count();
+            
+            if ($productsUsingTax > 0) {
+                return response()->json([
+                    'error' => true,
+                    'message' => "Cannot delete tax. It is currently being used by {$productsUsingTax} product(s)."
+                ], 422);
+            }
+
+            $tax->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Tax deleted successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => true,
+                'message' => 'Failed to delete tax: ' . $e->getMessage()
             ], 500);
         }
     }

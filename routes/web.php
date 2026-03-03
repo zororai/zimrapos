@@ -35,9 +35,14 @@ Route::post('/zimra/submit-receipt', [ZimraController::class, 'submitReceipt']);
 Route::post('/zimra/submit-credit-note', [ZimraController::class, 'submitCreditNote']);
 Route::post('/zimra/submit-file', [ZimraController::class, 'submitFile']);
 Route::get('/zimra/receipts', [ZimraController::class, 'getReceipts']);
+Route::get('/zimra/invoices', [ZimraController::class, 'getInvoices']);
 Route::get('/zimra/receipts/{id}/pdf', [ZimraController::class, 'downloadReceiptPdf']);
 Route::get('/zimra/next-invoice-no', [ZimraController::class, 'getNextInvoiceNo']);
 Route::get('/zimra/tax-config', [ZimraController::class, 'getTaxConfig']);
+Route::get('/zimra/taxes', [ZimraController::class, 'getTaxes']);
+Route::post('/zimra/taxes/create', [ZimraController::class, 'createTax']);
+Route::post('/zimra/taxes/update', [ZimraController::class, 'updateTax']);
+Route::post('/zimra/taxes/delete', [ZimraController::class, 'deleteTax']);
 
 // Test Route
 Route::get('/test-zimra', [\App\Http\Controllers\ZimraTestController::class, 'test']);

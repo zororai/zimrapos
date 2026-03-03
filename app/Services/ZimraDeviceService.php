@@ -2174,7 +2174,39 @@ class ZimraDeviceService
 
         /*
         |--------------------------------------------------------------------------
-        | 9️⃣ Save Receipt with Validation Status to Database
+        | 9️⃣ Generate QR Code for Receipt Verification
+        |--------------------------------------------------------------------------
+        | QR Format: {qrUrl}?deviceID={deviceID}&receiptID={receiptID}&fiscalDayNo={fiscalDayNo}&receiptGlobalNo={receiptGlobalNo}
+        | CRITICAL: Use exact values from submitReceipt REQUEST (not getStatus)
+        */
+        $qrCodeString = null;
+        
+        if ($zimraConfig->qr_url && $fdmsReceiptId) {
+            // Build QR string using ZIMRA spec format
+            $qrCodeString = $zimraConfig->qr_url .
+                '?deviceID=' . $deviceId .
+                '&receiptID=' . $fdmsReceiptId .
+                '&fiscalDayNo=' . $fiscalDayNo .
+                '&receiptGlobalNo=' . $receiptData['receiptGlobalNo'];
+            
+            Log::info('QR Code Generated', [
+                'qr_url' => $qrCodeString,
+                'device_id' => $deviceId,
+                'receipt_id' => $fdmsReceiptId,
+                'fiscal_day_no' => $fiscalDayNo,
+                'receipt_global_no' => $receiptData['receiptGlobalNo'],
+            ]);
+        } else {
+            Log::warning('QR Code NOT Generated', [
+                'qr_url_exists' => !empty($zimraConfig->qr_url),
+                'receipt_id_exists' => !empty($fdmsReceiptId),
+                'message' => 'Missing qr_url or receiptID - call getConfig first',
+            ]);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | 🔟 Save Receipt with Validation Status to Database
         |--------------------------------------------------------------------------
         */
         $primaryTax = $receiptData['receiptTaxes'][0] ?? [];
@@ -2203,6 +2235,7 @@ class ZimraDeviceService
             'buyer_data' => $receiptData['buyerData'] ?? null,
             'receipt_hash' => $receiptData['receiptDeviceSignature']['hash'] ?? null,
             'receipt_signature' => $receiptData['receiptDeviceSignature'] ?? null,
+            'receipt_qr_code' => $qrCodeString,
             'zimra_response' => $responseData,
             'receipt_date' => $receiptData['receiptDate'] ?? now(),
             'validation_code' => $receiptValidationCode,
