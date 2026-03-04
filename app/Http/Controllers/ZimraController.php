@@ -735,8 +735,19 @@ class ZimraController extends Controller
     {
         $receipt = Receipt::findOrFail($id);
         
+        // Generate QR code SVG if verification URL exists
+        $qrCodeSvg = null;
+        if ($receipt->receipt_qr_code) {
+            $qrCodeSvg = \SimpleSoftwareIO\QrCode\Facades\QrCode::size(150)
+                ->margin(1)
+                ->generate($receipt->receipt_qr_code);
+        }
+        
         // Generate PDF using dompdf
-        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('receipts.pdf', ['receipt' => $receipt]);
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('receipts.pdf', [
+            'receipt' => $receipt,
+            'qrCodeSvg' => $qrCodeSvg,
+        ]);
         
         // Set paper size and orientation
         $pdf->setPaper('a4', 'portrait');

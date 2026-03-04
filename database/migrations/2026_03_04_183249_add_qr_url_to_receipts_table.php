@@ -12,8 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('receipts', function (Blueprint $table) {
-            $table->date('date_issued')->nullable()->after('receipt_date');
-            $table->date('payment_due')->nullable()->after('date_issued');
+            $table->string('qr_url')->nullable()->after('receipt_qr_code');
         });
     }
 
@@ -23,7 +22,7 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('receipts', function (Blueprint $table) {
-            $table->dropColumn(['date_issued', 'payment_due']);
+            $table->dropColumn('qr_url');
         });
     }
 };

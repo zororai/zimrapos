@@ -244,15 +244,19 @@
             <div class="verification-section" style="flex: 1; text-align: right;">
                 <div class="verification-code">
                     <strong>Verification code</strong><br>
+                    @if($receipt->verification_code)
+                        <span style="font-size: 10pt; font-weight: bold; letter-spacing: 1px;">{{ $receipt->verification_code }}</span><br>
+                    @endif
                     @if($receipt->receipt_qr_code)
-                        {{ substr($receipt->receipt_qr_code, 0, 50) }}<br>
-                        <a href="{{ $receipt->receipt_qr_code }}" style="font-size: 8pt;">{{ $receipt->receipt_qr_code }}</a>
+                        <a href="{{ $receipt->receipt_qr_code }}" style="font-size: 7pt; word-break: break-all;">{{ $receipt->receipt_qr_code }}</a>
                     @else
-                        Verification URL not available
+                        <span style="font-size: 8pt; color: #666;">Verification URL not available</span>
                     @endif
                 </div>
                 @if($receipt->receipt_qr_code)
-                <div class="qr-code" id="qrcode"></div>
+                <div class="qr-code" style="margin-top: 10px;">
+                    {!! QrCode::size(150)->margin(1)->generate($receipt->receipt_qr_code) !!}
+                </div>
                 @endif
             </div>
         </div>
