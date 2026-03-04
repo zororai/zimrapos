@@ -735,18 +735,27 @@ class ZimraController extends Controller
     {
         $receipt = Receipt::findOrFail($id);
         
-        // Generate QR code SVG if verification URL exists
-        $qrCodeSvg = null;
+        // Generate QR code as SVG embedded in img tag for DomPDF compatibility
+        $qrCodeBase64 = null;
         if ($receipt->receipt_qr_code) {
-            $qrCodeSvg = \SimpleSoftwareIO\QrCode\Facades\QrCode::size(150)
+            $qrCodeSvg = \SimpleSoftwareIO\QrCode\Facades\QrCode::format('svg')
+                ->size(150)
                 ->margin(1)
                 ->generate($receipt->receipt_qr_code);
+            $qrCodeBase64 = 'data:image/svg+xml;base64,' . base64_encode($qrCodeSvg);
+        }
+        
+        // Generate verification code on-the-fly if missing but URL exists
+        $verificationCode = $receipt->verification_code;
+        if (!$verificationCode && $receipt->receipt_qr_code) {
+            $verificationCode = $this->generateVerificationCode($receipt->receipt_qr_code);
         }
         
         // Generate PDF using dompdf
         $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('receipts.pdf', [
             'receipt' => $receipt,
-            'qrCodeSvg' => $qrCodeSvg,
+            'qrCodeBase64' => $qrCodeBase64,
+            'verificationCode' => $verificationCode,
         ]);
         
         // Set paper size and orientation
@@ -1114,5 +1123,37 @@ class ZimraController extends Controller
                 'message' => 'Failed to delete tax: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Generate verification code from FDMS URL
+     * Format: XXXX-XXXX-XXXX-XXXX
+     */
+    protected function generateVerificationCode(string $verificationUrl): string
+    {
+        $parsedUrl = parse_url($verificationUrl);
+        $queryParams = [];
+        
+        if (isset($parsedUrl['query'])) {
+            parse_str($parsedUrl['query'], $queryParams);
+        }
+
+        $codeString = sprintf(
+            '%s%s%s%s',
+            $queryParams['deviceID'] ?? '',
+            $queryParams['receiptID'] ?? '',
+            $queryParams['fiscalDayNo'] ?? '',
+            $queryParams['receiptGlobalNo'] ?? ''
+        );
+
+        $hash = strtoupper(substr(md5($codeString), 0, 16));
+        
+        return sprintf(
+            '%s-%s-%s-%s',
+            substr($hash, 0, 4),
+            substr($hash, 4, 4),
+            substr($hash, 8, 4),
+            substr($hash, 12, 4)
+        );
     }
 }

@@ -33,6 +33,7 @@
             margin: 0 auto;
             background: white;
             padding: 10mm;
+            padding-bottom: 140px;
         }
         
         .header {
@@ -67,6 +68,48 @@
         .qr-code {
             display: inline-block;
             margin: 10px 0;
+        }
+        
+        .receipt-footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            text-align: center;
+            border-top: 1px dashed #000;
+            padding: 10px 15mm;
+            background: #fff;
+        }
+        
+        .receipt-footer .verification-title {
+            font-size: 8pt;
+            font-weight: bold;
+            margin-bottom: 3px;
+        }
+        
+        .receipt-footer .verification-code {
+            font-size: 9pt;
+            font-weight: bold;
+            letter-spacing: 1px;
+            margin-bottom: 5px;
+        }
+        
+        .receipt-footer .qr-code {
+            display: inline-block;
+            margin: 5px 0;
+        }
+        
+        .receipt-footer .verify-text {
+            font-size: 7pt;
+            color: #666;
+            margin-top: 3px;
+        }
+        
+        .receipt-footer .verification-url {
+            font-size: 6pt;
+            word-break: break-all;
+            color: #0066cc;
+            margin: 3px 0;
         }
         
         .invoice-title {
@@ -244,7 +287,9 @@
             <div class="verification-section" style="flex: 1; text-align: right;">
                 <div class="verification-code">
                     <strong>Verification code</strong><br>
-                    @if($receipt->verification_code)
+                    @if(isset($verificationCode) && $verificationCode)
+                        <span style="font-size: 10pt; font-weight: bold; letter-spacing: 1px;">{{ $verificationCode }}</span><br>
+                    @elseif($receipt->verification_code)
                         <span style="font-size: 10pt; font-weight: bold; letter-spacing: 1px;">{{ $receipt->verification_code }}</span><br>
                     @endif
                     @if($receipt->receipt_qr_code)
@@ -253,11 +298,6 @@
                         <span style="font-size: 8pt; color: #666;">Verification URL not available</span>
                     @endif
                 </div>
-                @if($receipt->receipt_qr_code)
-                <div class="qr-code" style="margin-top: 10px;">
-                    {!! QrCode::size(150)->margin(1)->generate($receipt->receipt_qr_code) !!}
-                </div>
-                @endif
             </div>
         </div>
         
@@ -486,6 +526,26 @@
         <div class="footer-note">
             Invoice is issued after purchasing goods according to agreement No.555
         </div>
+    </div>
+    
+    <div class="receipt-footer">
+        <div class="verification-title">Verification Code</div>
+        @if(isset($verificationCode) && $verificationCode)
+            <div class="verification-code">{{ $verificationCode }}</div>
+        @elseif($receipt->verification_code)
+            <div class="verification-code">{{ $receipt->verification_code }}</div>
+        @endif
+        @if(isset($qrCodeBase64) && $qrCodeBase64)
+            <div class="qr-code">
+                <img src="{{ $qrCodeBase64 }}" width="100" height="100" alt="QR Code">
+            </div>
+        @endif
+        @if($receipt->receipt_qr_code)
+            <div class="verification-url">
+                <a href="{{ $receipt->receipt_qr_code }}" style="color: #0066cc;">{{ $receipt->receipt_qr_code }}</a>
+            </div>
+        @endif
+        <div class="verify-text">Scan to verify receipt</div>
     </div>
     
     <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
