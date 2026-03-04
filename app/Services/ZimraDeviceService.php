@@ -13,6 +13,12 @@ use App\Models\DeviceState;
 
 class ZimraDeviceService
 {
+    protected ReceiptQrCodeService $qrCodeService;
+
+    public function __construct(ReceiptQrCodeService $qrCodeService)
+    {
+        $this->qrCodeService = $qrCodeService;
+    }
     /**
      * ZIMRA Validation Error Code Descriptions
      * Reference: FDMS Technical Specification
@@ -2180,6 +2186,8 @@ class ZimraDeviceService
         | CRITICAL: Use exact values from submitReceipt REQUEST (not getStatus)
         */
         $qrCodeString = null;
+        $qrCodeImageUrl = null;
+        $verificationCode = null;
         
         if ($zimraConfig->qr_url && $fdmsReceiptId) {
             // Build QR string using ZIMRA spec format
@@ -2189,13 +2197,27 @@ class ZimraDeviceService
                 '&fiscalDayNo=' . $fiscalDayNo .
                 '&receiptGlobalNo=' . $receiptData['receiptGlobalNo'];
             
-            Log::info('QR Code Generated', [
-                'qr_url' => $qrCodeString,
-                'device_id' => $deviceId,
-                'receipt_id' => $fdmsReceiptId,
-                'fiscal_day_no' => $fiscalDayNo,
-                'receipt_global_no' => $receiptData['receiptGlobalNo'],
-            ]);
+            // Generate QR code image using ReceiptQrCodeService
+            try {
+                $qrData = $this->qrCodeService->generateQrCode($qrCodeString, $fdmsReceiptId);
+                $qrCodeImageUrl = $qrData['qr_url'];
+                $verificationCode = $qrData['verification_code'];
+                
+                Log::info('QR Code Image Generated', [
+                    'qr_string' => $qrCodeString,
+                    'qr_image_url' => $qrCodeImageUrl,
+                    'verification_code' => $verificationCode,
+                    'device_id' => $deviceId,
+                    'receipt_id' => $fdmsReceiptId,
+                    'fiscal_day_no' => $fiscalDayNo,
+                    'receipt_global_no' => $receiptData['receiptGlobalNo'],
+                ]);
+            } catch (\Exception $e) {
+                Log::error('QR Code Image Generation Failed', [
+                    'error' => $e->getMessage(),
+                    'receipt_id' => $fdmsReceiptId,
+                ]);
+            }
         } else {
             Log::warning('QR Code NOT Generated', [
                 'qr_url_exists' => !empty($zimraConfig->qr_url),
@@ -2236,8 +2258,12 @@ class ZimraDeviceService
             'receipt_hash' => $receiptData['receiptDeviceSignature']['hash'] ?? null,
             'receipt_signature' => $receiptData['receiptDeviceSignature'] ?? null,
             'receipt_qr_code' => $qrCodeString,
+            'qr_url' => $qrCodeImageUrl,
+            'verification_code' => $verificationCode,
             'zimra_response' => $responseData,
             'receipt_date' => $receiptData['receiptDate'] ?? now(),
+            'date_issued' => $receiptData['dateIssued'] ?? null,
+            'payment_due' => $receiptData['paymentDue'] ?? null,
             'validation_code' => $receiptValidationCode,
             'validation_errors' => $parsedErrors,
             'is_valid' => $isValid,

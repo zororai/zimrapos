@@ -729,16 +729,25 @@
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-2">Receipt Lines</label>
                                     <template x-for="(line, index) in receiptForm.receiptLines" :key="index">
-                                        <div class="flex items-center space-x-2 mb-2 p-3 bg-gray-50 rounded-lg">
-                                            <input type="text" x-model="line.receiptLineName" placeholder="Product Name" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm" required>
-                                            <input type="number" x-model.number="line.receiptLineQuantity" placeholder="Qty" class="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm" min="1" required>
-                                            <input type="number" x-model.number="line.receiptLinePrice" placeholder="Price" step="0.01" class="w-24 px-3 py-2 border border-gray-300 rounded-lg text-sm" required>
-                                            <input type="text" x-model="line.receiptLineHSCode" placeholder="HS Code" class="w-28 px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                                            <button type="button" @click="removeReceiptLine(index)" class="p-2 text-red-600 hover:bg-red-100 rounded-lg" x-show="receiptForm.receiptLines.length > 1">
-                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                                                </svg>
-                                            </button>
+                                        <div class="mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                            <div class="flex items-center space-x-2 mb-2">
+                                                <input type="text" x-model="line.receiptLineName" placeholder="Product Name" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm" required>
+                                                <input type="number" x-model.number="line.receiptLineQuantity" placeholder="Qty" class="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm" min="1" required>
+                                                <input type="number" x-model.number="line.receiptLinePrice" placeholder="Price" step="0.01" class="w-24 px-3 py-2 border border-gray-300 rounded-lg text-sm" required>
+                                                <input type="text" x-model="line.receiptLineHSCode" placeholder="HS Code" class="w-28 px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                                                <button type="button" @click="removeReceiptLine(index)" class="p-2 text-red-600 hover:bg-red-100 rounded-lg" x-show="receiptForm.receiptLines.length > 1">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                                    </svg>
+                                                </button>
+                                            </div>
+                                            <div class="flex items-center space-x-2">
+                                                <label class="text-xs text-gray-600 w-24">Discount:</label>
+                                                <input type="number" x-model.number="line.receiptLineDiscount" placeholder="0.00" step="0.01" min="0" class="w-24 px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+                                                <span class="text-xs text-gray-500" x-show="line.receiptLineDiscount > 0">
+                                                    Net: <span class="font-medium" x-text="'$' + ((line.receiptLineQuantity * line.receiptLinePrice) - (line.receiptLineDiscount || 0)).toFixed(2)"></span>
+                                                </span>
+                                            </div>
                                         </div>
                                     </template>
                                     <button type="button" @click="addReceiptLine()" class="text-sm text-green-600 hover:text-green-700 font-medium flex items-center space-x-1">
@@ -784,6 +793,20 @@
                                         </select>
                                         <p class="text-xs text-gray-500 mt-1" x-show="taxConfig.isVatRegistered">Select tax rate from FDMS configuration</p>
                                         <p class="text-xs text-yellow-600 mt-1" x-show="!taxConfig.isVatRegistered">Tax field is disabled - device not VAT registered</p>
+                                    </div>
+                                </div>
+
+                                <!-- Date Issued and Payment Due -->
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Date Issued</label>
+                                        <input type="date" x-model="receiptForm.dateIssued" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-gray-50" readonly>
+                                        <p class="text-xs text-gray-500 mt-1">Auto-populated with current date</p>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Payment Due</label>
+                                        <input type="date" x-model="receiptForm.paymentDue" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                                        <p class="text-xs text-gray-500 mt-1">Optional: Set payment due date</p>
                                     </div>
                                 </div>
 
@@ -1386,11 +1409,13 @@
                     receiptCurrency: 'USD',
                     invoiceNo: '',
                     receiptLines: [
-                        { receiptLineName: '', receiptLineQuantity: 1, receiptLinePrice: 0, receiptLineHSCode: '' }
+                        { receiptLineName: '', receiptLineQuantity: 1, receiptLinePrice: 0, receiptLineDiscount: 0, receiptLineHSCode: '' }
                     ],
                     paymentMethod: 'Cash',
                     taxCode: 'A',
                     taxPercent: 15,
+                    dateIssued: new Date().toISOString().split('T')[0],
+                    paymentDue: '',
                     buyerData: {
                         buyerRegisterName: '',
                         buyerTradeName: '',
@@ -1894,7 +1919,9 @@
                 
                 calculateTotal() {
                     return this.receiptForm.receiptLines.reduce((sum, line) => {
-                        return sum + (line.receiptLineQuantity * line.receiptLinePrice);
+                        const lineTotal = (line.receiptLineQuantity * line.receiptLinePrice);
+                        const discount = line.receiptLineDiscount || 0;
+                        return sum + (lineTotal - discount);
                     }, 0);
                 },
                 
@@ -1930,6 +1957,7 @@
                         receiptLineName: '',
                         receiptLineQuantity: 1,
                         receiptLinePrice: 0,
+                        receiptLineDiscount: 0,
                         receiptLineHSCode: ''
                     });
                 },
@@ -2215,7 +2243,9 @@
 
                 calculateTotal() {
                     return this.receiptForm.receiptLines.reduce((sum, line) => {
-                        return sum + (line.receiptLineQuantity * line.receiptLinePrice);
+                        const lineTotal = (line.receiptLineQuantity * line.receiptLinePrice);
+                        const discount = line.receiptLineDiscount || 0;
+                        return sum + (lineTotal - discount);
                     }, 0);
                 },
 
@@ -2224,6 +2254,7 @@
                         receiptLineName: '',
                         receiptLineQuantity: 1,
                         receiptLinePrice: 0,
+                        receiptLineDiscount: 0,
                         receiptLineHSCode: ''
                     });
                 },

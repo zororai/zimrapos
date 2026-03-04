@@ -78,16 +78,23 @@
         }
         
         .parties-section {
-            display: flex;
-            justify-content: space-between;
+            width: 100%;
             margin-bottom: 20px;
-            gap: 20px;
+        }
+        
+        .parties-section table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .parties-section td {
+            width: 50%;
+            vertical-align: top;
+            padding: 0 10px;
         }
         
         .party-box {
-            flex: 1;
-            border: 1px solid #000;
-            padding: 10px;
+            padding: 0;
         }
         
         .party-title {
@@ -261,58 +268,65 @@
         </div>
         
         <div class="parties-section">
-            <div class="party-box">
-                <div class="party-title">SELLER</div>
-                <div class="party-info">
-                    <strong>{{ $companyName }}</strong><br>
-                    TIN: {{ $companyTin }}<br>
-                    @if($config && $config->company_address)
-                        {{ $config->company_address }}<br>
-                    @endif
-                    Device ID: {{ $receipt->device_id }}
-                </div>
-            </div>
-            
-            <div class="party-box">
-                <div class="party-title">BUYER</div>
-                <div class="party-info">
-                    @if($receipt->buyer_data)
-                        @if(isset($receipt->buyer_data['buyerRegisterName']))
-                            <strong>{{ $receipt->buyer_data['buyerRegisterName'] }}</strong><br>
-                        @endif
-                        @if(isset($receipt->buyer_data['buyerTradeName']) && $receipt->buyer_data['buyerTradeName'] != $receipt->buyer_data['buyerRegisterName'])
-                            Trading as: {{ $receipt->buyer_data['buyerTradeName'] }}<br>
-                        @endif
-                        @if(isset($receipt->buyer_data['buyerTIN']))
-                            TIN: {{ $receipt->buyer_data['buyerTIN'] }}<br>
-                        @endif
-                        @if(isset($receipt->buyer_data['vatNumber']))
-                            VAT: {{ $receipt->buyer_data['vatNumber'] }}<br>
-                        @endif
-                        @if(isset($receipt->buyer_data['buyerAddress']))
-                            @php
-                                $address = [];
-                                if(isset($receipt->buyer_data['buyerAddress']['houseNo'])) $address[] = $receipt->buyer_data['buyerAddress']['houseNo'];
-                                if(isset($receipt->buyer_data['buyerAddress']['street'])) $address[] = $receipt->buyer_data['buyerAddress']['street'];
-                                if(isset($receipt->buyer_data['buyerAddress']['district'])) $address[] = $receipt->buyer_data['buyerAddress']['district'];
-                                if(isset($receipt->buyer_data['buyerAddress']['city'])) $address[] = $receipt->buyer_data['buyerAddress']['city'];
-                                $fullAddress = implode(', ', array_filter($address));
-                            @endphp
-                            @if($fullAddress)
-                                {{ $fullAddress }}<br>
-                            @endif
-                        @endif
-                        @if(isset($receipt->buyer_data['buyerContacts']['phoneNo']))
-                            Tel: {{ $receipt->buyer_data['buyerContacts']['phoneNo'] }}<br>
-                        @endif
-                        @if(isset($receipt->buyer_data['buyerContacts']['email']))
-                            Email: {{ $receipt->buyer_data['buyerContacts']['email'] }}
-                        @endif
-                    @else
-                        <em>Cash Customer</em>
-                    @endif
-                </div>
-            </div>
+            <table>
+                <tr>
+                    <td>
+                        <div class="party-box">
+                            <div class="party-title">SELLER</div>
+                            <div class="party-info">
+                                <strong>{{ $companyName }}</strong><br>
+                                TIN: {{ $companyTin }}<br>
+                                @if($config && $config->company_address)
+                                    {{ $config->company_address }}<br>
+                                @endif
+                                Device ID: {{ $receipt->device_id }}
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="party-box">
+                            <div class="party-title">BUYER</div>
+                            <div class="party-info">
+                                @if($receipt->buyer_data)
+                                    @if(isset($receipt->buyer_data['buyerRegisterName']))
+                                        <strong>{{ $receipt->buyer_data['buyerRegisterName'] }}</strong><br>
+                                    @endif
+                                    @if(isset($receipt->buyer_data['buyerTradeName']) && $receipt->buyer_data['buyerTradeName'] != $receipt->buyer_data['buyerRegisterName'])
+                                        Trading as: {{ $receipt->buyer_data['buyerTradeName'] }}<br>
+                                    @endif
+                                    @if(isset($receipt->buyer_data['buyerTIN']))
+                                        TIN: {{ $receipt->buyer_data['buyerTIN'] }}<br>
+                                    @endif
+                                    @if(isset($receipt->buyer_data['vatNumber']))
+                                        VAT: {{ $receipt->buyer_data['vatNumber'] }}<br>
+                                    @endif
+                                    @if(isset($receipt->buyer_data['buyerAddress']))
+                                        @php
+                                            $address = [];
+                                            if(isset($receipt->buyer_data['buyerAddress']['houseNo'])) $address[] = $receipt->buyer_data['buyerAddress']['houseNo'];
+                                            if(isset($receipt->buyer_data['buyerAddress']['street'])) $address[] = $receipt->buyer_data['buyerAddress']['street'];
+                                            if(isset($receipt->buyer_data['buyerAddress']['district'])) $address[] = $receipt->buyer_data['buyerAddress']['district'];
+                                            if(isset($receipt->buyer_data['buyerAddress']['city'])) $address[] = $receipt->buyer_data['buyerAddress']['city'];
+                                            $fullAddress = implode(', ', array_filter($address));
+                                        @endphp
+                                        @if($fullAddress)
+                                            {{ $fullAddress }}<br>
+                                        @endif
+                                    @endif
+                                    @if(isset($receipt->buyer_data['buyerContacts']['phoneNo']))
+                                        Tel: {{ $receipt->buyer_data['buyerContacts']['phoneNo'] }}<br>
+                                    @endif
+                                    @if(isset($receipt->buyer_data['buyerContacts']['email']))
+                                        Email: {{ $receipt->buyer_data['buyerContacts']['email'] }}
+                                    @endif
+                                @else
+                                    <em>Cash Customer</em>
+                                @endif
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+            </table>
         </div>
         
         <div class="invoice-details">
@@ -320,28 +334,74 @@
             <div class="detail-row">Date: <strong>{{ $receipt->receipt_date->format('d/m/Y H:i') }}</strong></div>
             <div class="detail-row">Fiscal device ID: <strong>{{ $receipt->device_id }}</strong></div>
             <div class="detail-row">Fiscal day No: <strong>{{ $receipt->fiscal_day_no }}</strong></div>
+            @if(isset($receipt->date_issued))
+            <div class="detail-row">Date Issued: <strong>{{ \Carbon\Carbon::parse($receipt->date_issued)->format('d/m/Y') }}</strong></div>
+            @endif
+            @if(isset($receipt->payment_due))
+            <div class="detail-row">Payment Due: <strong>{{ \Carbon\Carbon::parse($receipt->payment_due)->format('d/m/Y') }}</strong></div>
+            @endif
         </div>
         
         <table class="items-table">
             <thead>
                 <tr>
-                    <th style="width: 8%;">Code</th>
-                    <th style="width: 40%;">Description</th>
-                    <th class="text-center" style="width: 8%;">Qty</th>
-                    <th class="text-right" style="width: 12%;">Price</th>
-                    <th class="text-right" style="width: 10%;">VAT</th>
-                    <th class="text-right" style="width: 22%;">Total amount<br>(incl. tax)</th>
+                    <th style="width: 5%;">Code</th>
+                    <th style="width: 28%;">Description</th>
+                    <th class="text-center" style="width: 6%;">Qty</th>
+                    <th class="text-right" style="width: 9%;">Price<br>({{ $receipt->receipt_currency }})</th>
+                    <th class="text-right" style="width: 9%;">Discount<br>({{ $receipt->receipt_currency }})</th>
+                    <th class="text-right" style="width: 12%;">Amount<br>(excl. Tax)<br>({{ $receipt->receipt_currency }})</th>
+                    <th class="text-right" style="width: 9%;">Tax<br>({{ $receipt->receipt_currency }})</th>
+                    <th class="text-right" style="width: 12%;">Amount<br>(incl. Tax)<br>({{ $receipt->receipt_currency }})</th>
                 </tr>
             </thead>
             <tbody>
                 @foreach($receipt->receipt_lines as $index => $line)
-                <tr>
+                @php
+                    $lineType = $line['receiptLineType'] ?? 'Sale';
+                    $isDiscount = $lineType === 'Discount';
+                    $linePrice = abs($line['receiptLinePrice'] ?? 0);
+                    $lineTotal = abs($line['receiptLineTotal'] ?? 0);
+                    $lineQty = $line['receiptLineQuantity'] ?? 1;
+                    $taxPercent = $line['taxPercent'] ?? $receipt->tax_percent ?? 0;
+                    
+                    // Calculate discount amount (0 for sale lines, show amount for discount lines)
+                    $discountAmount = $isDiscount ? $lineTotal : 0;
+                    
+                    // Calculate amounts
+                    if ($taxPercent > 0) {
+                        // Tax inclusive calculation
+                        $amountInclTax = $lineTotal;
+                        $taxAmount = $lineTotal - ($lineTotal / (1 + ($taxPercent / 100)));
+                        $amountExclTax = $lineTotal - $taxAmount;
+                    } else {
+                        // No tax
+                        $amountInclTax = $lineTotal;
+                        $taxAmount = 0;
+                        $amountExclTax = $lineTotal;
+                    }
+                @endphp
+                <tr @if($isDiscount) style="background-color: #fff8dc;" @endif>
                     <td>{{ $line['receiptLineHSCode'] ?? ($index + 1) }}</td>
-                    <td>{{ $line['receiptLineName'] ?? 'Item' }}</td>
-                    <td class="text-center">{{ $line['receiptLineQuantity'] ?? 1 }}</td>
-                    <td class="text-right">{{ number_format(abs($line['receiptLinePrice'] ?? 0), 2) }}</td>
-                    <td class="text-right">{{ number_format(abs(($line['receiptLineTotal'] ?? 0) - ($line['receiptLineTotal'] ?? 0) / (1 + ($receipt->tax_percent / 100))), 2) }}</td>
-                    <td class="text-right">{{ number_format(abs($line['receiptLineTotal'] ?? 0), 2) }}</td>
+                    <td>
+                        @if($isDiscount)
+                            <em style="color: #d97706;">{{ $line['receiptLineName'] ?? 'Discount' }}</em>
+                        @else
+                            {{ $line['receiptLineName'] ?? 'Item' }}
+                        @endif
+                    </td>
+                    <td class="text-center">{{ $lineQty }}</td>
+                    <td class="text-right">{{ number_format($linePrice, 2) }}</td>
+                    <td class="text-right" style="color: {{ $discountAmount > 0 ? '#d97706' : '#666' }};">
+                        @if($discountAmount > 0)
+                            ({{ number_format($discountAmount, 2) }})
+                        @else
+                            -
+                        @endif
+                    </td>
+                    <td class="text-right">{{ number_format($amountExclTax, 2) }}</td>
+                    <td class="text-right">{{ number_format($taxAmount, 2) }}</td>
+                    <td class="text-right"><strong>{{ number_format($amountInclTax, 2) }}</strong></td>
                 </tr>
                 @endforeach
             </tbody>
@@ -399,7 +459,7 @@
                 <tr class="subtotal-row">
                     <td style="width: 60%;"><strong>Sub Total</strong><br><span style="font-size: 8pt; color: #666;">(excl. Tax)</span></td>
                     <td style="width: 15%; text-align: center;"></td>
-                    <td style="width: 25%;" class="text-right"><strong>{{ number_format($subtotal, 2) }}</strong></td>
+                    <td style="width: 25%;" class="text-right"><strong>{{ $receipt->receipt_currency }} {{ number_format($subtotal, 2) }}</strong></td>
                 </tr>
                 <tr>
                     <th colspan="3">Tax Summary</th>
@@ -408,7 +468,7 @@
                 <tr class="tax-row">
                     <td style="padding-left: 20px;">{{ $label }}</td>
                     <td></td>
-                    <td class="text-right">{{ number_format($amount, 2) }}</td>
+                    <td class="text-right">{{ $receipt->receipt_currency }} {{ number_format($amount, 2) }}</td>
                 </tr>
                 @endforeach
                 <tr class="grand-total-row">
