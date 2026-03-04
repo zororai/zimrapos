@@ -141,23 +141,58 @@
         
         .totals-section {
             margin-top: 15px;
-            text-align: right;
         }
         
-        .total-row {
-            display: flex;
-            justify-content: flex-end;
-            gap: 20px;
-            padding: 3px 0;
+        .tax-summary-table {
+            width: 50%;
+            margin-left: auto;
+            border-collapse: collapse;
+            margin-top: 20px;
+            font-size: 9.5pt;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .tax-summary-table th {
+            background: linear-gradient(to bottom, #e8e8e8, #d0d0d0);
+            border: 1px solid #999;
+            padding: 10px 12px;
+            text-align: center;
+            font-weight: bold;
             font-size: 10pt;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         
-        .total-row.grand-total {
+        .tax-summary-table td {
+            border: 1px solid #ccc;
+            padding: 10px 12px;
+        }
+        
+        .tax-summary-table .text-right {
+            text-align: right;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .tax-summary-table .subtotal-row td {
+            background: #f5f5f5;
+            font-weight: 600;
+            border-bottom: 2px solid #999;
+        }
+        
+        .tax-summary-table .tax-row td {
+            background: #fafafa;
+        }
+        
+        .tax-summary-table .tax-row:hover td {
+            background: #f0f0f0;
+        }
+        
+        .tax-summary-table .grand-total-row td {
+            background: linear-gradient(to bottom, #f8f8f8, #e8e8e8);
             font-weight: bold;
             font-size: 11pt;
-            border-top: 2px solid #000;
-            padding-top: 8px;
-            margin-top: 5px;
+            border-top: 3px double #000;
+            padding: 12px;
         }
         
         .footer-note {
@@ -312,15 +347,76 @@
             </tbody>
         </table>
         
+        @php
+            // Calculate subtotal (excluding tax)
+            $subtotal = 0;
+            $taxBreakdown = [];
+            
+            // Group taxes by type
+            if (isset($receipt->receipt_taxes) && is_array($receipt->receipt_taxes)) {
+                foreach ($receipt->receipt_taxes as $tax) {
+                    $taxPercent = $tax['taxPercent'] ?? 0;
+                    $taxAmount = abs($tax['taxAmount'] ?? 0);
+                    $salesAmount = abs($tax['salesAmountWithTax'] ?? 0);
+                    $taxCode = $tax['taxCode'] ?? null;
+                    
+                    // Determine tax label
+                    if ($taxPercent == 0) {
+                        $label = 'Zero rated (0%)';
+                    } elseif ($taxPercent == 15 || $taxPercent == 15.5) {
+                        $label = 'Standard rated (' . $taxPercent . '%)';
+                    } elseif ($taxPercent == 5) {
+                        $label = 'Non-VAT Withholding Tax (5%)';
+                    } else {
+                        $label = 'Exempt';
+                    }
+                    
+                    if (!isset($taxBreakdown[$label])) {
+                        $taxBreakdown[$label] = 0;
+                    }
+                    $taxBreakdown[$label] += $taxAmount;
+                    
+                    // Add to subtotal (sales amount minus tax)
+                    $subtotal += ($salesAmount - $taxAmount);
+                }
+            }
+            
+            // If no taxes, calculate from total
+            if (empty($taxBreakdown)) {
+                $subtotal = abs($receipt->receipt_total) - abs($receipt->tax_amount);
+                if ($receipt->tax_percent > 0) {
+                    $taxBreakdown['Standard rated (' . $receipt->tax_percent . '%)'] = abs($receipt->tax_amount);
+                } else {
+                    $taxBreakdown['Zero rated (0%)'] = 0;
+                }
+            }
+            
+            $grandTotal = abs($receipt->receipt_total);
+        @endphp
+        
         <div class="totals-section">
-            <div class="total-row">
-                <span>Total {{ $receipt->tax_percent }}% VAT:</span>
-                <span style="min-width: 100px; text-align: right;">{{ number_format(abs($receipt->tax_amount), 2) }}</span>
-            </div>
-            <div class="total-row grand-total">
-                <span>Invoice total, {{ $receipt->receipt_currency }}:</span>
-                <span style="min-width: 100px; text-align: right;">{{ number_format(abs($receipt->receipt_total), 2) }}</span>
-            </div>
+            <table class="tax-summary-table">
+                <tr class="subtotal-row">
+                    <td style="width: 60%;"><strong>Sub Total</strong><br><span style="font-size: 8pt; color: #666;">(excl. Tax)</span></td>
+                    <td style="width: 15%; text-align: center;"></td>
+                    <td style="width: 25%;" class="text-right"><strong>{{ number_format($subtotal, 2) }}</strong></td>
+                </tr>
+                <tr>
+                    <th colspan="3">Tax Summary</th>
+                </tr>
+                @foreach($taxBreakdown as $label => $amount)
+                <tr class="tax-row">
+                    <td style="padding-left: 20px;">{{ $label }}</td>
+                    <td></td>
+                    <td class="text-right">{{ number_format($amount, 2) }}</td>
+                </tr>
+                @endforeach
+                <tr class="grand-total-row">
+                    <td><strong>Grand Total</strong></td>
+                    <td class="text-right"><strong>{{ $receipt->receipt_currency }}</strong></td>
+                    <td class="text-right"><strong>{{ number_format($grandTotal, 2) }}</strong></td>
+                </tr>
+            </table>
         </div>
         
         <div class="footer-note">

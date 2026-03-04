@@ -800,7 +800,7 @@ class ZimraController extends Controller
     | Get Next Invoice Number (for current device)
     |--------------------------------------------------------------------------
     */
-    public function getNextInvoiceNo()
+    public function getNextInvoiceNo(ZimraDeviceService $zimra)
     {
         $config = ZimraConfig::getActive();
         
@@ -808,30 +808,51 @@ class ZimraController extends Controller
             return response()->json(['invoice_no' => 'INV-001']);
         }
 
-        // Get all receipts for this device and find the highest invoice number
-        $receipts = Receipt::where('device_id', $config->device_id)
-            ->whereNotNull('invoice_no')
-            ->pluck('invoice_no');
+        $deviceId = $config->device_id;
 
-        if ($receipts->isEmpty()) {
-            return response()->json(['invoice_no' => 'INV-001']);
+        try {
+            // Get FDMS status to fetch lastReceiptGlobalNo
+            $fdmsStatus = $zimra->getStatus($deviceId);
+            
+            // Get lastReceiptGlobalNo from FDMS and increment by 1
+            $lastGlobalNo = $fdmsStatus['lastReceiptGlobalNo'] ?? 0;
+            $nextGlobalNo = $lastGlobalNo + 1;
+            
+            // Format invoice number as INV-{globalNo}
+            $invoiceNo = 'INV-' . str_pad($nextGlobalNo, 3, '0', STR_PAD_LEFT);
+            
+            \Log::info('Next Invoice Number Generated from FDMS', [
+                'device_id' => $deviceId,
+                'fdms_last_global_no' => $lastGlobalNo,
+                'next_global_no' => $nextGlobalNo,
+                'invoice_no' => $invoiceNo,
+            ]);
+            
+            return response()->json([
+                'invoice_no' => $invoiceNo,
+                'next_global_no' => $nextGlobalNo,
+                'fdms_last_global_no' => $lastGlobalNo,
+            ]);
+            
+        } catch (\Exception $e) {
+            \Log::error('Failed to get next invoice number from FDMS', [
+                'error' => $e->getMessage(),
+                'device_id' => $deviceId,
+            ]);
+            
+            // Fallback: use local database
+            $maxGlobalNo = Receipt::where('device_id', $deviceId)
+                ->max('receipt_global_no') ?? 0;
+            
+            $nextGlobalNo = $maxGlobalNo + 1;
+            $invoiceNo = 'INV-' . str_pad($nextGlobalNo, 3, '0', STR_PAD_LEFT);
+            
+            return response()->json([
+                'invoice_no' => $invoiceNo,
+                'next_global_no' => $nextGlobalNo,
+                'fallback' => true,
+            ]);
         }
-
-        // Find the highest invoice number
-        $highestNumber = 0;
-        foreach ($receipts as $invoiceNo) {
-            if (preg_match('/INV-(\d+)/', $invoiceNo, $matches)) {
-                $number = (int) $matches[1];
-                if ($number > $highestNumber) {
-                    $highestNumber = $number;
-                }
-            }
-        }
-
-        $nextNumber = $highestNumber + 1;
-        return response()->json([
-            'invoice_no' => 'INV-' . str_pad($nextNumber, 3, '0', STR_PAD_LEFT)
-        ]);
     }
 
     /*
