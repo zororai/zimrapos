@@ -284,21 +284,6 @@
                 <!-- Logo placeholder - add your company logo here -->
                 <div style="width: 60px; height: 60px; border: 1px solid #000; display: flex; align-items: center; justify-content: center; font-size: 8pt;">LOGO</div>
             </div>
-            <div class="verification-section" style="flex: 1; text-align: right;">
-                <div class="verification-code">
-                    <strong>Verification code</strong><br>
-                    @if(isset($verificationCode) && $verificationCode)
-                        <span style="font-size: 10pt; font-weight: bold; letter-spacing: 1px;">{{ $verificationCode }}</span><br>
-                    @elseif($receipt->verification_code)
-                        <span style="font-size: 10pt; font-weight: bold; letter-spacing: 1px;">{{ $receipt->verification_code }}</span><br>
-                    @endif
-                    @if($receipt->receipt_qr_code)
-                        <a href="{{ $receipt->receipt_qr_code }}" style="font-size: 7pt; word-break: break-all;">{{ $receipt->receipt_qr_code }}</a>
-                    @else
-                        <span style="font-size: 8pt; color: #666;">Verification URL not available</span>
-                    @endif
-                </div>
-            </div>
         </div>
         
         <div class="invoice-title">
