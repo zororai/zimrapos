@@ -49,13 +49,13 @@ export default function DebitNotes() {
     setSelectedReceipt(receipt);
     
     if (receipt && receipt.receipt_lines) {
-      // Initialize line items with 0 debit quantity
+      // Initialize line items with original quantity (user will adjust to new total)
       const lineItems = receipt.receipt_lines.map((line, index) => ({
         line_index: index,
         receiptLineName: line.receiptLineName,
         receiptLinePrice: parseFloat(line.receiptLinePrice || 0),
         originalQuantity: parseFloat(line.receiptLineQuantity || 0),
-        debitQuantity: 0, // User will set this
+        newQuantity: parseFloat(line.receiptLineQuantity || 0), // Start with original, user adjusts
         taxPercent: line.taxPercent,
         taxID: line.taxID,
         taxCode: line.taxCode,
@@ -97,14 +97,18 @@ export default function DebitNotes() {
     setFormData(prev => ({
       ...prev,
       lineItems: prev.lineItems.map((item, i) => 
-        i === index ? { ...item, debitQuantity: Math.max(0, parseInt(quantity) || 0) } : item
+        i === index ? { ...item, newQuantity: Math.max(0, parseFloat(quantity) || 0) } : item
       )
     }));
   };
 
   const calculateDebitTotal = () => {
     return formData.lineItems.reduce((total, item) => {
-      return total + (item.receiptLinePrice * item.debitQuantity);
+      const adjustment = item.newQuantity - item.originalQuantity;
+      if (adjustment > 0) {
+        return total + (item.receiptLinePrice * adjustment);
+      }
+      return total;
     }, 0);
   };
 
@@ -115,10 +119,10 @@ export default function DebitNotes() {
       return;
     }
     
-    // Filter only items with debit quantity > 0
-    const itemsToDebit = formData.lineItems.filter(item => item.debitQuantity > 0);
+    // Filter only items with adjustment > 0 (new quantity > original quantity)
+    const itemsToDebit = formData.lineItems.filter(item => item.newQuantity > item.originalQuantity);
     if (itemsToDebit.length === 0) {
-      toast.error('Please set debit quantity for at least one item');
+      toast.error('Please increase quantity for at least one item to create a debit note');
       return;
     }
 
@@ -127,10 +131,10 @@ export default function DebitNotes() {
       return;
     }
 
-    // Build products array for backend
+    // Build products array for backend with NEW quantity (backend will calculate adjustment)
     const products = itemsToDebit.map(item => ({
       line_index: item.line_index,
-      quantity: item.debitQuantity,
+      quantity: item.newQuantity, // Send new total quantity, backend calculates adjustment
       name: item.receiptLineName,
       price: item.receiptLinePrice,
       taxID: item.taxID,
@@ -162,8 +166,8 @@ export default function DebitNotes() {
         <div className="bg-white p-6 rounded-lg shadow">
           <h2 className="text-xl font-semibold mb-4">Create Debit Note</h2>
           <p className="text-sm text-gray-600 mb-4">
-            Create a debit note to add additional charges to a previous invoice. 
-            The debit note will be automatically submitted to ZIMRA and linked to the original receipt.
+            <strong>Debit notes add charges to a previous invoice.</strong> Enter the corrected (higher) quantity for items that need adjustment. 
+            The system will automatically calculate and submit only the adjustment amount to ZIMRA.
           </p>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -203,48 +207,61 @@ export default function DebitNotes() {
 
             {selectedReceipt && formData.lineItems.length > 0 && (
               <div>
-                <label className="block text-sm font-medium mb-2">Line Items to Debit</label>
+                <label className="block text-sm font-medium mb-2">Adjust Line Item Quantities</label>
+                <p className="text-xs text-gray-500 mb-2">Enter the corrected total quantity. The adjustment (difference) will be sent to ZIMRA.</p>
                 <div className="border rounded-lg overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-3 py-2 text-left">Item</th>
                         <th className="px-3 py-2 text-right">Price</th>
-                        <th className="px-3 py-2 text-center">Orig Qty</th>
-                        <th className="px-3 py-2 text-center">Debit Qty</th>
-                        <th className="px-3 py-2 text-right">Debit Amount</th>
+                        <th className="px-3 py-2 text-center">Original Qty</th>
+                        <th className="px-3 py-2 text-center">New Qty</th>
+                        <th className="px-3 py-2 text-center">Adjustment</th>
+                        <th className="px-3 py-2 text-right">Adjustment Amount</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {formData.lineItems.map((item, index) => (
-                        <tr key={index} className="border-t">
-                          <td className="px-3 py-2">{item.receiptLineName}</td>
-                          <td className="px-3 py-2 text-right">{selectedReceipt.receipt_currency} {item.receiptLinePrice.toFixed(2)}</td>
-                          <td className="px-3 py-2 text-center">{item.originalQuantity}</td>
-                          <td className="px-3 py-2 text-center">
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={item.debitQuantity}
-                              onChange={(e) => handleLineItemChange(index, e.target.value)}
-                              className="w-20 px-2 py-1 border rounded text-center"
-                              placeholder="0"
-                            />
-                          </td>
-                          <td className="px-3 py-2 text-right font-medium">
-                            {item.debitQuantity > 0 ? (
-                              <span className="text-green-600">
-                                +{selectedReceipt.receipt_currency} {(item.receiptLinePrice * item.debitQuantity).toFixed(2)}
-                              </span>
-                            ) : '—'}
-                          </td>
-                        </tr>
-                      ))}
+                      {formData.lineItems.map((item, index) => {
+                        const adjustment = item.newQuantity - item.originalQuantity;
+                        return (
+                          <tr key={index} className="border-t">
+                            <td className="px-3 py-2">{item.receiptLineName}</td>
+                            <td className="px-3 py-2 text-right">{selectedReceipt.receipt_currency} {item.receiptLinePrice.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-center text-gray-500">{item.originalQuantity}</td>
+                            <td className="px-3 py-2 text-center">
+                              <input
+                                type="number"
+                                min={item.originalQuantity}
+                                step="0.01"
+                                value={item.newQuantity}
+                                onChange={(e) => handleLineItemChange(index, e.target.value)}
+                                className="w-20 px-2 py-1 border rounded text-center"
+                              />
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              {adjustment > 0 ? (
+                                <span className="text-green-600 font-medium">+{adjustment}</span>
+                              ) : adjustment < 0 ? (
+                                <span className="text-red-600">{adjustment}</span>
+                              ) : (
+                                <span className="text-gray-400">0</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right font-medium">
+                              {adjustment > 0 ? (
+                                <span className="text-green-600">
+                                  +{selectedReceipt.receipt_currency} {(item.receiptLinePrice * adjustment).toFixed(2)}
+                                </span>
+                              ) : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                     <tfoot className="bg-gray-50 font-medium">
                       <tr className="border-t">
-                        <td colSpan="4" className="px-3 py-2 text-right">Total Debit Amount:</td>
+                        <td colSpan="5" className="px-3 py-2 text-right">Total Adjustment Amount:</td>
                         <td className="px-3 py-2 text-right text-green-600">
                           +{selectedReceipt.receipt_currency} {calculateDebitTotal().toFixed(2)}
                         </td>

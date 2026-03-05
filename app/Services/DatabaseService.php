@@ -935,25 +935,26 @@ class DatabaseService
                 $name = $productModel->name;
             }
 
-            // For debit notes, use tax-exclusive pricing
+            // For debit notes, use tax-exclusive pricing with BCMath for precision
             // FDMS spec for receiptLinesTaxInclusive = false:
             // - receiptLineTotal = base amount (WITHOUT tax)
             // - taxAmount = SUM(receiptLineTotal) * (taxPercent/100)
-            // - salesAmountWithTax = SUM(receiptLineTotal) * (1 + taxPercent/100)
-            $lineTotal = $price * $quantity; // Base amount WITHOUT tax
-            $taxPercentDecimal = $taxPercent / 100; // Convert 15 to 0.15
-            $taxAmount = $lineTotal * $taxPercentDecimal;
-            $salesAmount = $lineTotal * (1 + $taxPercentDecimal);
+            // - salesAmountWithTax = SUM(receiptLineTotal) + taxAmount
+            bcscale(2);
+            $lineTotal = bcmul((string)$price, (string)$quantity, 2); // Base amount WITHOUT tax
+            $taxPercentDecimal = bcdiv((string)$taxPercent, '100', 4); // Convert 15 to 0.15
+            $taxAmount = bcmul($lineTotal, $taxPercentDecimal, 2);
+            $salesAmount = bcadd($lineTotal, $taxAmount, 2); // base + tax
 
             $receiptLines[] = [
                 'receiptLineType' => 'Sale',
                 'receiptLineNo' => count($receiptLines) + 1,
                 'receiptLineHSCode' => $hsCode,
                 'receiptLineName' => $name,
-                'receiptLinePrice' => round($price, 2),
-                'receiptLineQuantity' => $quantity,
-                'receiptLineTotal' => round($lineTotal, 2), // Base amount WITHOUT tax
-                'taxPercent' => $taxPercent,
+                'receiptLinePrice' => (float)$price,
+                'receiptLineQuantity' => (float)$quantity,
+                'receiptLineTotal' => (float)$lineTotal, // Base amount WITHOUT tax
+                'taxPercent' => (float)$taxPercent,
                 'taxID' => $taxId,
             ];
 
@@ -965,14 +966,14 @@ class DatabaseService
             if (!isset($taxGroups[$taxKey])) {
                 $taxGroups[$taxKey] = [
                     'taxID' => $taxId,
-                    'taxPercent' => $taxPercent,
-                    'taxAmount' => 0,
-                    'salesAmountWithTax' => 0,
+                    'taxPercent' => (float)$taxPercent,
+                    'taxAmount' => 0.0,
+                    'salesAmountWithTax' => 0.0,
                 ];
             }
-            $taxGroups[$taxKey]['taxAmount'] += $taxAmount;
-            $taxGroups[$taxKey]['salesAmountWithTax'] += $lineTotal;
-            $receiptTotal += $lineTotal;
+            $taxGroups[$taxKey]['taxAmount'] = bcadd((string)$taxGroups[$taxKey]['taxAmount'], $taxAmount, 2);
+            $taxGroups[$taxKey]['salesAmountWithTax'] = bcadd((string)$taxGroups[$taxKey]['salesAmountWithTax'], $salesAmount, 2);
+            $receiptTotal = bcadd((string)$receiptTotal, $salesAmount, 2); // Total includes tax
         }
 
         foreach ($taxGroups as $tax) {
@@ -991,20 +992,38 @@ class DatabaseService
             ]
         ];
 
+        // Debug logging BEFORE building final payload
+        \Log::info('DEBIT_NOTE_PAYLOAD_DEBUG', [
+            'original_receipt' => [
+                'id' => $originalReceipt->id,
+                'invoice_no' => $originalReceipt->invoice_no,
+                'receipt_global_no' => $originalReceipt->receipt_global_no,
+                'receipt_date' => $originalReceipt->receipt_date,
+                'fdms_receipt_id' => $originalReceipt->fdms_receipt_id,
+            ],
+            'receiptLines' => $receiptLines,
+            'receiptTaxes' => $receiptTaxes,
+            'receiptTotal' => $receiptTotal,
+            'receiptLinesTaxInclusive' => false,
+        ]);
+
         $receiptData = [
             'receiptType' => 'DebitNote',
             'receiptCurrency' => $currencyCode,
             'invoiceNo' => $noteData['invoice_no'] ?? 'DN-' . time(),
             'receiptNotes' => $noteData['reason'],
+            'receiptLinesTaxInclusive' => false, // Tax-exclusive pricing for debit notes
             'creditDebitNote' => [
                 'creditDebitNoteReceiptGlobalNo' => $originalReceipt->receipt_global_no,
-                'creditDebitNoteDate' => $originalReceipt->receipt_date->format('Y-m-d\TH:i:s'),
+                'creditDebitNoteDate' => $originalReceipt->receipt_date instanceof \Carbon\Carbon
+                    ? $originalReceipt->receipt_date->format('Y-m-d\TH:i:s')
+                    : $originalReceipt->receipt_date,
             ],
             'receiptDate' => now()->format('Y-m-d\TH:i:s'),
             'receiptLines' => $receiptLines,
             'receiptTaxes' => $receiptTaxes,
             'receiptPayments' => $receiptPayments,
-            'receiptTotal' => round($receiptTotal, 2),
+            'receiptTotal' => (float)$receiptTotal,
             'original_receipt_id' => $originalReceipt->id,
             'external_reference' => $noteData['external_reference'] ?? null,
         ];
