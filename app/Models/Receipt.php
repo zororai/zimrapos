@@ -10,9 +10,12 @@ class Receipt extends Model
     use SoftDeletes;
 
     protected $fillable = [
+        'status',
         'device_id',
         'invoice_no',
         'receipt_type',
+        'original_receipt_id',
+        'external_reference',
         'receipt_currency',
         'receipt_counter',
         'receipt_global_no',
@@ -38,9 +41,15 @@ class Receipt extends Model
         'validation_code',
         'validation_errors',
         'is_valid',
+        'is_voided',
+        'voided_by_receipt_id',
         'has_red_errors',
         'has_gray_errors',
         'fdms_receipt_id',
+        'fdms_operation_id',
+        'fdms_server_date',
+        'fdms_certificate_thumbprint',
+        'receipt_notes',
     ];
 
     protected $casts = [
@@ -52,12 +61,14 @@ class Receipt extends Model
         'zimra_response' => 'array',
         'validation_errors' => 'array',
         'receipt_date' => 'datetime',
+        'fdms_server_date' => 'datetime',
         'date_issued' => 'date',
         'payment_due' => 'date',
         'receipt_total' => 'decimal:2',
         'tax_amount' => 'decimal:2',
         'tax_percent' => 'decimal:2',
         'is_valid' => 'boolean',
+        'is_voided' => 'boolean',
         'has_red_errors' => 'boolean',
         'has_gray_errors' => 'boolean',
     ];
@@ -94,5 +105,27 @@ class Receipt extends Model
     public function fiscalDay()
     {
         return $this->belongsTo(FiscalDay::class, 'fiscal_day_no', 'fiscal_day_no');
+    }
+
+    public function originalReceipt()
+    {
+        return $this->belongsTo(Receipt::class, 'original_receipt_id');
+    }
+
+    public function voidedByReceipt()
+    {
+        return $this->belongsTo(Receipt::class, 'voided_by_receipt_id');
+    }
+
+    public function creditNotes()
+    {
+        return $this->hasMany(Receipt::class, 'original_receipt_id')
+            ->where('receipt_type', 'CreditNote');
+    }
+
+    public function debitNotes()
+    {
+        return $this->hasMany(Receipt::class, 'original_receipt_id')
+            ->where('receipt_type', 'DebitNote');
     }
 }

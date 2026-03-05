@@ -1122,9 +1122,9 @@
                                     <div>
                                         <label class="block text-sm font-medium text-gray-700 mb-1">Select Original Invoice *</label>
                                         <select x-model="debitNoteForm.invoice_id" @change="loadInvoiceDetails()" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" required>
-                                            <option value="">-- Select an invoice --</option>
+                                            <option value="">-- Select a fiscalized invoice --</option>
                                             <template x-for="invoice in invoices" :key="invoice.id">
-                                                <option :value="invoice.id" x-text="`${invoice.invoice_number} - USD ${parseFloat(invoice.total || 0).toFixed(2)} (${new Date(invoice.created_at).toLocaleDateString()})`"></option>
+                                                <option :value="invoice.id" x-text="`${invoice.invoice_no} - ${invoice.receipt_currency || 'USD'} ${parseFloat(invoice.receipt_total || 0).toFixed(2)} (${new Date(invoice.created_at).toLocaleDateString()})`"></option>
                                             </template>
                                         </select>
                                         <p class="text-xs text-gray-500 mt-1">Select the original invoice to debit</p>
@@ -1150,37 +1150,51 @@
                                 </div>
 
                                 <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-2">Additional Products/Charges</label>
-                                    <template x-if="selectedInvoice">
-                                        <div class="space-y-2">
-                                            <template x-for="(product, index) in selectedInvoice.products" :key="index">
-                                                <div class="p-3 bg-gray-50 rounded-lg">
-                                                    <div class="flex items-center space-x-3">
-                                                        <input type="checkbox" :id="'product-' + index" x-model="debitNoteForm.selectedProducts[index]" class="w-4 h-4 text-green-600">
-                                                        <label :for="'product-' + index" class="flex-1 text-sm">
-                                                            <span class="font-medium" x-text="product.name"></span>
-                                                            <span class="text-gray-600"> - Price: </span><span x-text="'USD ' + parseFloat(product.selling_price).toFixed(2)"></span>
-                                                        </label>
-                                                    </div>
-                                                    <div x-show="debitNoteForm.selectedProducts[index]" class="mt-2 ml-7 flex items-center space-x-3">
-                                                        <label class="text-xs text-gray-600">Debit Qty:</label>
-                                                        <input 
-                                                            type="number" 
-                                                            x-model.number="debitNoteForm.productQuantities[index]"
-                                                            min="0.01"
-                                                            step="0.01"
-                                                            class="w-24 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                                                            placeholder="Qty">
-                                                        <span class="text-sm font-medium text-gray-700">
-                                                            = <span x-text="'USD ' + calculateProductDebit(index).toFixed(2)"></span>
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </template>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Line Items to Debit</label>
+                                    <template x-if="selectedInvoice && selectedInvoice.receipt_lines && selectedInvoice.receipt_lines.length > 0">
+                                        <div class="border rounded-lg overflow-hidden">
+                                            <table class="w-full text-sm">
+                                                <thead class="bg-gray-50">
+                                                    <tr>
+                                                        <th class="px-3 py-2 text-left">Item</th>
+                                                        <th class="px-3 py-2 text-right">Price</th>
+                                                        <th class="px-3 py-2 text-center">Orig Qty</th>
+                                                        <th class="px-3 py-2 text-center">Debit Qty</th>
+                                                        <th class="px-3 py-2 text-right">Debit Amount</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <template x-for="(line, index) in selectedInvoice.receipt_lines" :key="index">
+                                                        <tr class="border-t">
+                                                            <td class="px-3 py-2" x-text="line.receiptLineName"></td>
+                                                            <td class="px-3 py-2 text-right" x-text="debitNoteForm.currency + ' ' + parseFloat(line.receiptLinePrice || 0).toFixed(2)"></td>
+                                                            <td class="px-3 py-2 text-center" x-text="parseFloat(line.receiptLineQuantity || 0)"></td>
+                                                            <td class="px-3 py-2 text-center">
+                                                                <input 
+                                                                    type="number" 
+                                                                    x-model.number="debitNoteForm.productQuantities[index]"
+                                                                    min="0"
+                                                                    step="0.01"
+                                                                    class="w-20 px-2 py-1 text-sm border border-gray-300 rounded text-center focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                                                    placeholder="0">
+                                                            </td>
+                                                            <td class="px-3 py-2 text-right font-medium">
+                                                                <span x-show="debitNoteForm.productQuantities[index] > 0" class="text-green-600" x-text="'+' + debitNoteForm.currency + ' ' + calculateProductDebit(index).toFixed(2)"></span>
+                                                                <span x-show="!debitNoteForm.productQuantities[index] || debitNoteForm.productQuantities[index] === 0">—</span>
+                                                            </td>
+                                                        </tr>
+                                                    </template>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </template>
+                                    <template x-if="selectedInvoice && (!selectedInvoice.receipt_lines || selectedInvoice.receipt_lines.length === 0)">
+                                        <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800">
+                                            No line items found on this receipt. The receipt may not have been stored with line item details.
                                         </div>
                                     </template>
                                     <template x-if="!selectedInvoice">
-                                        <p class="text-sm text-gray-500 italic">Select an invoice to see products</p>
+                                        <p class="text-sm text-gray-500 italic">Select an invoice to see line items</p>
                                     </template>
                                 </div>
 
@@ -2400,49 +2414,61 @@
 
                 async loadInvoices() {
                     try {
-                        const res = await fetch('/zimra/invoices');
+                        // Fetch fiscalized receipts (not Panier invoices)
+                        const res = await fetch('/zimra/receipts');
                         if (res.ok) {
                             const data = await res.json();
-                            this.invoices = data.invoices || [];
-                            console.log('Loaded invoices:', this.invoices);
+                            // Filter to only show FiscalInvoice type receipts that are fiscalized
+                            this.invoices = (data.receipts || []).filter(r => 
+                                r.receipt_type === 'FiscalInvoice' && 
+                                r.fdms_receipt_id && 
+                                !r.is_voided
+                            );
+                            console.log('Loaded receipts for debit notes:', this.invoices);
                             if (this.invoices.length === 0) {
-                                this.showMessage('No invoices found. Please create an invoice first.', 'error');
+                                this.showMessage('No fiscalized invoices found. Please create and fiscalize an invoice first.', 'error');
                             }
                         } else {
-                            console.error('Failed to load invoices. Status:', res.status);
-                            this.showMessage('Failed to load invoices', 'error');
+                            console.error('Failed to load receipts. Status:', res.status);
+                            this.showMessage('Failed to load receipts', 'error');
                         }
                     } catch (e) {
-                        console.error('Failed to load invoices:', e);
-                        this.showMessage('Error loading invoices: ' + e.message, 'error');
+                        console.error('Failed to load receipts:', e);
+                        this.showMessage('Error loading receipts: ' + e.message, 'error');
                     }
                 },
 
                 loadInvoiceDetails() {
                     this.selectedInvoice = this.invoices.find(inv => inv.id == this.debitNoteForm.invoice_id);
                     if (this.selectedInvoice) {
-                        this.debitNoteForm.currency = 'USD';
+                        this.debitNoteForm.currency = this.selectedInvoice.receipt_currency || 'USD';
                         this.debitNoteForm.selectedProducts = [];
-                        this.debitNoteForm.productQuantities = (this.selectedInvoice.products || []).map(() => 1);
-                        console.log('Selected Invoice:', this.selectedInvoice);
+                        // Use receipt_lines instead of products
+                        const lines = this.selectedInvoice.receipt_lines || [];
+                        this.debitNoteForm.productQuantities = lines.map(() => 0);
+                        console.log('Selected Receipt:', this.selectedInvoice);
+                        console.log('Receipt Lines:', lines);
                     }
                 },
 
                 calculateProductDebit(index) {
-                    if (!this.selectedInvoice || !this.selectedInvoice.products[index]) return 0;
+                    const lines = this.selectedInvoice?.receipt_lines || [];
+                    if (!lines[index]) return 0;
                     
-                    const product = this.selectedInvoice.products[index];
+                    const line = lines[index];
                     const debitQty = this.debitNoteForm.productQuantities[index] || 0;
-                    const price = parseFloat(product.selling_price || 0);
+                    const price = parseFloat(line.receiptLinePrice || 0);
                     
                     return Math.abs(debitQty * price);
                 },
 
                 calculateDebitTotal() {
-                    if (!this.selectedInvoice || !this.selectedInvoice.products) return 0;
+                    const lines = this.selectedInvoice?.receipt_lines || [];
+                    if (lines.length === 0) return 0;
                     
-                    return this.selectedInvoice.products.reduce((sum, product, index) => {
-                        if (this.debitNoteForm.selectedProducts[index]) {
+                    return lines.reduce((sum, line, index) => {
+                        const debitQty = this.debitNoteForm.productQuantities[index] || 0;
+                        if (debitQty > 0) {
                             return sum + this.calculateProductDebit(index);
                         }
                         return sum;
@@ -2460,9 +2486,11 @@
                         return;
                     }
 
-                    const selectedProductsCount = this.debitNoteForm.selectedProducts.filter(Boolean).length;
-                    if (selectedProductsCount === 0) {
-                        this.showMessage('Please select at least one product to debit', 'error');
+                    // Check if any line item has debit quantity > 0
+                    const lines = this.selectedInvoice?.receipt_lines || [];
+                    const hasDebitItems = lines.some((_, index) => this.debitNoteForm.productQuantities[index] > 0);
+                    if (!hasDebitItems) {
+                        this.showMessage('Please set debit quantity for at least one item', 'error');
                         return;
                     }
                     
@@ -2476,26 +2504,27 @@
                     this.debitNoteResponse = null;
 
                     try {
+                        // Build products array from receipt_lines with debit quantities
                         const selectedProducts = [];
-                        this.debitNoteForm.selectedProducts.forEach((selected, index) => {
-                            if (selected && this.selectedInvoice.products[index]) {
-                                const product = this.selectedInvoice.products[index];
+                        lines.forEach((line, index) => {
+                            const debitQty = this.debitNoteForm.productQuantities[index] || 0;
+                            if (debitQty > 0) {
                                 selectedProducts.push({
-                                    id: product.id,
-                                    name: product.name,
-                                    selling_price: parseFloat(product.selling_price),
-                                    quantity: this.debitNoteForm.productQuantities[index] || 1
+                                    name: line.receiptLineName,
+                                    price: parseFloat(line.receiptLinePrice || 0),
+                                    quantity: debitQty,
+                                    taxID: line.taxID,
+                                    taxPercent: line.taxPercent,
+                                    taxCode: line.taxCode,
+                                    receiptLineHSCode: line.receiptLineHSCode || ''
                                 });
                             }
                         });
 
                         const payload = {
-                            data: [{
-                                invoice_id: this.debitNoteForm.invoice_id,
-                                products: selectedProducts,
-                                reason: this.debitNoteForm.reason
-                            }],
-                            zimra_fiscalize: true
+                            invoice_id: this.selectedInvoice.invoice_no,
+                            products: selectedProducts,
+                            reason: this.debitNoteForm.reason
                         };
 
                         console.log('Submitting Debit Note:', payload);

@@ -155,6 +155,12 @@ export const deliveryNoteApi = {
     api.get(`/delivery-note/download?id=${id}`),
 };
 
+// Receipts (fiscalized documents)
+export const receiptApi = {
+  getAll: () => api.get('/zimra/receipts'),
+  getById: (id) => api.get(`/zimra/receipts/${id}`),
+};
+
 // ZIMRA
 export const zimraApi = {
   openDay: () => api.get('/zimra/open-day'),

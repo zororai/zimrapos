@@ -817,181 +817,185 @@ class DatabaseService
 
     // ==================== DEBIT NOTES ====================
 
-    public function createDebitNotes(array $data, bool $zimraFiscalize = false): array
+    public function createDebitNote(array $noteData, bool $zimraFiscalize = true): array
     {
-        $created = [];
-        $zimraErrors = [];
-
-        foreach ($data as $noteData) {
-            $invoiceId = $noteData['invoice_id'] ?? null;
-            
-            if (!$invoiceId) {
-                throw new \Exception('invoice_id is required for debit note creation');
-            }
-
-            // Try to find as Panier invoice first, then as ZIMRA receipt
-            $invoice = PanierInvoice::where('panier_id', $invoiceId)->first();
-            $originalReceipt = null;
-            
-            if (!$invoice) {
-                // Look for ZIMRA receipt instead
-                $originalReceipt = \App\Models\Receipt::find($invoiceId);
-                if (!$originalReceipt) {
-                    throw new \Exception("Invoice/Receipt with ID {$invoiceId} not found");
-                }
-            }
-
-            $products = $noteData['products'] ?? [];
-            $total = 0;
-            
-            // Calculate total from products
-            foreach ($products as $product) {
-                $quantity = $product['quantity'] ?? 0;
-                $price = $product['selling_price'] ?? 0;
-                $total += ($quantity * $price);
-            }
-
-            $note = PanierDebitNote::create([
-                'panier_id' => Str::ulid()->toString(),
-                'invoice_id' => $invoiceId,
-                'customer_id' => $noteData['customer_id'] ?? ($invoice ? $invoice->customer_id : null),
-                'total' => abs($total),
-                'reason' => $noteData['reason'] ?? null,
-                'zimra_fiscalized' => $zimraFiscalize,
-                'products' => $products,
-                'panier_data' => $noteData,
-            ]);
-
-            if ($zimraFiscalize) {
-                try {
-                    $zimraResult = $this->submitDebitNoteToZimra($note, $invoice, $originalReceipt, $noteData);
-                    
-                    if (isset($zimraResult['error'])) {
-                        $zimraErrors[] = [
-                            'debit_note_id' => $note->panier_id,
-                            'error' => $zimraResult,
-                        ];
-                    } else {
-                        $note->update([
-                            'zimra_fiscal_code' => $zimraResult['fdms_receipt_id'] ?? null,
-                        ]);
-                    }
-                } catch (\Exception $e) {
-                    $zimraErrors[] = [
-                        'debit_note_id' => $note->panier_id,
-                        'error' => $e->getMessage(),
-                    ];
-                }
-            }
-            
-            $created[] = $this->formatDebitNote($note->fresh());
-        }
-
-        $result = ['created' => $created];
+        $invoiceId = $noteData['invoice_id'] ?? null;
+        $externalReference = $noteData['external_reference'] ?? null;
         
-        if (!empty($zimraErrors)) {
-            $result['zimra_errors'] = $zimraErrors;
+        if (!$invoiceId) {
+            throw new \Exception('invoice_id is required for debit note creation');
         }
 
-        return $result;
-    }
+        if (!isset($noteData['reason']) || empty($noteData['reason'])) {
+            throw new \Exception('reason is required for debit note creation');
+        }
 
-    protected function submitDebitNoteToZimra(PanierDebitNote $debitNote, ?PanierInvoice $invoice, ?\App\Models\Receipt $originalReceipt, array $noteData): array
-    {
-        $zimraService = app(\App\Services\ZimraDeviceService::class);
+        // STEP 1: Validate original receipt exists and is fiscalized
+        $originalReceipt = \App\Models\Receipt::where('invoice_no', $invoiceId)
+            ->orWhere('id', $invoiceId)
+            ->first();
+        
+        if (!$originalReceipt) {
+            throw new \Exception("Original receipt with ID {$invoiceId} not found");
+        }
+
+        if (!$originalReceipt->fdms_receipt_id) {
+            throw new \Exception("Original receipt {$invoiceId} is not fiscalized. Cannot create debit note.");
+        }
+
+        if ($originalReceipt->is_voided) {
+            throw new \Exception("Original receipt {$invoiceId} is voided. Cannot create debit note.");
+        }
+
+        // STEP 2: Check for duplicate external reference
+        if ($externalReference) {
+            $existing = \App\Models\Receipt::where('external_reference', $externalReference)
+                ->where('receipt_type', 'DebitNote')
+                ->first();
+            
+            if ($existing) {
+                throw new \Exception("Debit note with external reference {$externalReference} already exists (Receipt ID: {$existing->id})");
+            }
+        }
+
+        // STEP 3: Validate currency and device match
         $zimraConfig = \App\Models\ZimraConfig::getActive();
-        
         if (!$zimraConfig || !$zimraConfig->device_id) {
             throw new \Exception('No active ZIMRA configuration found');
         }
 
-        $deviceId = $zimraConfig->device_id;
+        if ($originalReceipt->device_id !== $zimraConfig->device_id) {
+            throw new \Exception("Original receipt device_id does not match current device");
+        }
+
+        // STEP 4: Build receipt payload and submit to ZIMRA
+        if ($zimraFiscalize) {
+            $zimraResult = $this->submitDebitNoteToZimra($originalReceipt, $noteData);
+            
+            if (isset($zimraResult['error'])) {
+                throw new \Exception($zimraResult['message'] ?? 'ZIMRA submission failed');
+            }
+
+            // Return the created receipt from ZIMRA submission
+            return [
+                'success' => true,
+                'receipt' => $zimraResult['receipt'] ?? null,
+                'fdms_receipt_id' => $zimraResult['fdms_receipt_id'] ?? null,
+            ];
+        }
+
+        throw new \Exception('Debit notes must be fiscalized');
+    }
+
+    protected function submitDebitNoteToZimra(\App\Models\Receipt $originalReceipt, array $noteData): array
+    {
+        $zimraService = app(\App\Services\ZimraDeviceService::class);
+        $zimraConfig = \App\Models\ZimraConfig::getActive();
         
-        // If we don't have the original receipt yet, try to find it
-        if (!$originalReceipt && $invoice) {
-            $originalReceipt = \App\Models\Receipt::where('device_id', $deviceId)
-                ->where('invoice_no', $invoice->panier_id)
-                ->orWhere('invoice_no', 'LIKE', '%' . substr($invoice->panier_id, -8))
-                ->first();
-        }
+        $deviceId = $zimraConfig->device_id;
+        $currencyCode = $originalReceipt->receipt_currency;
 
-        if (!$originalReceipt) {
-            throw new \Exception(
-                "Original receipt not found. Cannot create debit note without original ZIMRA receipt."
-            );
-        }
-
-        $currencyCode = $originalReceipt->receipt_currency ?? 'USD';
-
+        $products = $noteData['products'] ?? [];
         $receiptLines = [];
         $receiptTaxes = [];
         $taxGroups = [];
+        $receiptTotal = 0;
 
-        foreach ($debitNote->products as $product) {
-            $productModel = PanierProduct::where('panier_id', $product['id'])->first();
-            $quantity = $product['quantity'] ?? 1;
-            $price = abs($productModel?->selling_price ?? 0);
-            
-            $tax = $productModel?->tax;
-            $taxPercent = $tax ? (float) $tax->percentage : 0;
-            $taxId = $tax?->zimra_tax_id ?? 1;
-            $taxCode = $tax?->code ?? 'A';
+        foreach ($products as $product) {
+            // Check if product has line item details (from receipt) or needs lookup (legacy)
+            if (isset($product['price']) && isset($product['name'])) {
+                // New format: line item details from original receipt
+                $quantity = $product['quantity'] ?? 1;
+                $price = abs(floatval($product['price']));
+                $taxPercent = floatval($product['taxPercent'] ?? 0);
+                $taxId = intval($product['taxID'] ?? 1);
+                $taxCode = $product['taxCode'] ?? null;
+                $hsCode = $product['receiptLineHSCode'] ?? '';
+                $name = $product['name'];
+            } else {
+                // Legacy format: lookup product by ID
+                $productModel = PanierProduct::where('panier_id', $product['id'])->first();
+                
+                if (!$productModel) {
+                    throw new \Exception("Product {$product['id']} not found");
+                }
 
-            $lineTotal = $price * $quantity;
-            $taxAmount = $lineTotal * ($taxPercent / (100 + $taxPercent));
-            $lineAmountWithoutTax = $lineTotal - $taxAmount;
+                $quantity = $product['quantity'] ?? 1;
+                $price = abs($productModel->selling_price ?? 0);
+                
+                $tax = $productModel->tax;
+                if (!$tax) {
+                    throw new \Exception("Product {$productModel->name} does not have a tax assigned");
+                }
+
+                $taxPercent = (float) $tax->percentage;
+                $taxId = $tax->zimra_tax_id;
+                $taxCode = $tax->code ?? null;
+                $hsCode = $productModel->hs_code ?? '';
+                $name = $productModel->name;
+            }
+
+            // For debit notes, use tax-exclusive pricing
+            // FDMS spec for receiptLinesTaxInclusive = false:
+            // - receiptLineTotal = base amount (WITHOUT tax)
+            // - taxAmount = SUM(receiptLineTotal) * (taxPercent/100)
+            // - salesAmountWithTax = SUM(receiptLineTotal) * (1 + taxPercent/100)
+            $lineTotal = $price * $quantity; // Base amount WITHOUT tax
+            $taxPercentDecimal = $taxPercent / 100; // Convert 15 to 0.15
+            $taxAmount = $lineTotal * $taxPercentDecimal;
+            $salesAmount = $lineTotal * (1 + $taxPercentDecimal);
 
             $receiptLines[] = [
                 'receiptLineType' => 'Sale',
                 'receiptLineNo' => count($receiptLines) + 1,
-                'receiptLineHSCode' => $productModel?->hs_code ?? '',
-                'receiptLineName' => $productModel?->name ?? $product['name'] ?? 'Product',
+                'receiptLineHSCode' => $hsCode,
+                'receiptLineName' => $name,
                 'receiptLinePrice' => round($price, 2),
                 'receiptLineQuantity' => $quantity,
-                'receiptLineTotal' => round($lineTotal, 2),
+                'receiptLineTotal' => round($lineTotal, 2), // Base amount WITHOUT tax
                 'taxPercent' => $taxPercent,
                 'taxID' => $taxId,
-                'taxCode' => $taxCode,
             ];
+
+            if ($taxCode) {
+                $receiptLines[count($receiptLines) - 1]['taxCode'] = $taxCode;
+            }
 
             $taxKey = "{$taxId}_{$taxPercent}";
             if (!isset($taxGroups[$taxKey])) {
                 $taxGroups[$taxKey] = [
                     'taxID' => $taxId,
                     'taxPercent' => $taxPercent,
-                    'taxCode' => $taxCode,
                     'taxAmount' => 0,
                     'salesAmountWithTax' => 0,
                 ];
             }
             $taxGroups[$taxKey]['taxAmount'] += $taxAmount;
             $taxGroups[$taxKey]['salesAmountWithTax'] += $lineTotal;
+            $receiptTotal += $lineTotal;
         }
 
         foreach ($taxGroups as $tax) {
             $receiptTaxes[] = [
                 'taxID' => $tax['taxID'],
                 'taxPercent' => $tax['taxPercent'],
-                'taxCode' => $tax['taxCode'],
                 'taxAmount' => round($tax['taxAmount'], 2),
                 'salesAmountWithTax' => round($tax['salesAmountWithTax'], 2),
             ];
         }
 
-        $receiptTotal = round((float) $debitNote->total, 2);
-
         $receiptPayments = [
             [
                 'moneyTypeCode' => 'Cash',
-                'paymentAmount' => $receiptTotal,
+                'paymentAmount' => round($receiptTotal, 2),
             ]
         ];
 
         $receiptData = [
             'receiptType' => 'DebitNote',
             'receiptCurrency' => $currencyCode,
-            'invoiceNo' => 'DN-' . strtoupper(substr($debitNote->panier_id, -8)),
-            'receiptNotes' => $debitNote->reason ?? 'Debit note',
+            'invoiceNo' => $noteData['invoice_no'] ?? 'DN-' . time(),
+            'receiptNotes' => $noteData['reason'],
             'creditDebitNote' => [
                 'creditDebitNoteReceiptGlobalNo' => $originalReceipt->receipt_global_no,
                 'creditDebitNoteDate' => $originalReceipt->receipt_date->format('Y-m-d\TH:i:s'),
@@ -1000,11 +1004,13 @@ class DatabaseService
             'receiptLines' => $receiptLines,
             'receiptTaxes' => $receiptTaxes,
             'receiptPayments' => $receiptPayments,
-            'receiptTotal' => $receiptTotal,
+            'receiptTotal' => round($receiptTotal, 2),
+            'original_receipt_id' => $originalReceipt->id,
+            'external_reference' => $noteData['external_reference'] ?? null,
         ];
 
-        if ($invoice->customer_id) {
-            $customer = PanierCustomer::where('panier_id', $invoice->customer_id)->first();
+        if (isset($noteData['customer_id'])) {
+            $customer = PanierCustomer::where('panier_id', $noteData['customer_id'])->first();
             if ($customer) {
                 $receiptData['buyerData'] = [
                     'buyerRegisterName' => $customer->name,
@@ -1023,7 +1029,15 @@ class DatabaseService
             }
         }
 
-        return $zimraService->submitReceipt($receiptData, $deviceId);
+        $result = $zimraService->submitReceipt($receiptData, $deviceId);
+        
+        return [
+            'success' => !isset($result['error']),
+            'receipt' => $result['receipt'] ?? null,
+            'fdms_receipt_id' => $result['fdms_receipt_id'] ?? null,
+            'error' => $result['error'] ?? null,
+            'message' => $result['message'] ?? null,
+        ];
     }
 
     public function searchDebitNotes(string $query = '*', int $limit = 10, int $skip = 0): array

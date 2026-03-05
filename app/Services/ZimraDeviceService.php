@@ -4308,4 +4308,121 @@ private function validateReceiptTotals(array $receipt): void
         
         return implode('', $taxParts);
     }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Get Fiscal Day Status (wrapper for ReceiptService)
+    |--------------------------------------------------------------------------
+    */
+    public function getFiscalDayStatus(int $deviceId): array
+    {
+        $status = $this->getStatus($deviceId);
+        
+        if (isset($status['error'])) {
+            throw new \Exception('Failed to get device status from FDMS');
+        }
+
+        return [
+            'fiscalDayStatus' => $status['fiscalDayStatus'] ?? 'Unknown',
+            'fiscalDayNo' => $status['fiscalDayNo'] ?? null,
+            'lastFiscalDayNo' => $status['lastFiscalDayNo'] ?? 1,
+            'lastReceiptGlobalNo' => $status['lastReceiptGlobalNo'] ?? 0,
+            'lastReceiptCounter' => $status['lastReceiptCounter'] ?? 0,
+        ];
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Submit Receipt to FDMS (wrapper for ReceiptService)
+    |--------------------------------------------------------------------------
+    | This method handles only the FDMS communication.
+    | Counter management and signature are handled by ReceiptService.
+    */
+    public function submitReceiptToFdms(array $receiptData, int $deviceId): array
+    {
+        $zimraConfig = ZimraConfig::where('device_id', $deviceId)->first();
+
+        if (!$zimraConfig) {
+            throw new \Exception("No ZIMRA configuration found for device {$deviceId}");
+        }
+
+        $baseUrl = $zimraConfig->base_url;
+        $mtls = $this->prepareMtlsCertificates($zimraConfig);
+
+        // Build the receipt payload
+        $payload = [
+            'receipt' => [
+                'receiptType' => $receiptData['receiptType'],
+                'receiptCurrency' => $receiptData['receiptCurrency'],
+                'receiptCounter' => $receiptData['receiptCounter'],
+                'receiptGlobalNo' => $receiptData['receiptGlobalNo'],
+                'invoiceNo' => $receiptData['invoiceNo'] ?? 'INV-' . $receiptData['receiptGlobalNo'],
+                'receiptDate' => $receiptData['receiptDate'],
+                'receiptLinesTaxInclusive' => $receiptData['receiptLinesTaxInclusive'] ?? false,
+                'receiptLines' => $receiptData['receiptLines'],
+                'receiptTaxes' => $receiptData['receiptTaxes'],
+                'receiptPayments' => $receiptData['receiptPayments'],
+                'receiptTotal' => $receiptData['receiptTotal'],
+                'receiptPrintForm' => $receiptData['receiptPrintForm'] ?? 'Receipt48',
+                'receiptDeviceSignature' => $receiptData['receiptDeviceSignature'],
+            ]
+        ];
+
+        // Add optional fields
+        if (!empty($receiptData['buyerData'])) {
+            $payload['receipt']['buyerData'] = $receiptData['buyerData'];
+        }
+        if (!empty($receiptData['receiptNotes'])) {
+            $payload['receipt']['receiptNotes'] = $receiptData['receiptNotes'];
+        }
+        if (!empty($receiptData['creditDebitNote'])) {
+            $payload['receipt']['creditDebitNote'] = $receiptData['creditDebitNote'];
+        }
+
+        Log::info('FINAL_JSON_SENT', [
+            'json' => json_encode($payload),
+            'length' => strlen(json_encode($payload)),
+            'device_id' => $deviceId,
+            'endpoint' => "/Device/v1/{$deviceId}/SubmitReceipt",
+        ]);
+
+        $response = Http::withOptions($mtls)->withHeaders([
+            'DeviceModelName' => $zimraConfig->device_model,
+            'DeviceModelVersion' => $zimraConfig->device_version,
+            'Accept' => 'application/json',
+            'Content-Type' => 'application/json',
+        ])->post("{$baseUrl}/Device/v1/{$deviceId}/SubmitReceipt", $payload);
+
+        Log::info('ZIMRA SubmitReceipt Raw Response', [
+            'status' => $response->status(),
+            'raw_body' => $response->body(),
+        ]);
+
+        if (!$response->successful()) {
+            return [
+                'error' => true,
+                'status' => $response->status(),
+                'message' => 'FDMS request failed',
+                'body' => $response->json(),
+            ];
+        }
+
+        $result = $response->json();
+
+        // Log validation errors
+        if (!empty($result['validationErrors'])) {
+            foreach ($result['validationErrors'] as $error) {
+                $errorCode = $error['validationErrorCode'] ?? 'UNKNOWN';
+                $errorColor = $error['validationErrorColor'] ?? 'Unknown';
+                Log::error('ZIMRA Validation Error', [
+                    'validationErrorCode' => $errorCode,
+                    'validationErrorColor' => $errorColor,
+                    'errorMessage' => self::VALIDATION_ERROR_MESSAGES[$errorCode] ?? "Unknown error ({$errorCode})",
+                    'receipt_id' => $result['receiptID'] ?? null,
+                ]);
+            }
+        }
+
+        return $result;
+    }
 }

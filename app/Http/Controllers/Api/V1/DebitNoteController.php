@@ -14,32 +14,30 @@ class DebitNoteController extends BaseController
 
     /**
      * @OA\Post(
-     *     path="/debit-note/create",
-     *     summary="Create debit notes",
-     *     description="Create debit notes in your Panier company with optional ZIMRA fiscalization. Only USD and ZWG supported for ZIMRA. All products must have ZIMRA Tax and valid HS Code.",
-     *     operationId="createDebitNotes",
+     *     path="/debit-notes",
+     *     summary="Create a debit note",
+     *     description="Create a debit note as a fiscal document. Must reference an original fiscalized receipt. Debit notes are automatically fiscalized with ZIMRA. Only USD and ZWG supported. All products must have ZIMRA Tax and valid HS Code.",
+     *     operationId="createDebitNote",
      *     tags={"Debit Notes"},
      *     security={{"AppId": {}, "ApiKey": {}}},
      *     @OA\RequestBody(
      *         required=true,
      *         @OA\JsonContent(
-     *             required={"data"},
-     *             @OA\Property(property="data", type="array", minItems=1, maxItems=50,
-     *                 @OA\Items(type="object", required={"invoice_id", "products", "reason"},
-     *                     @OA\Property(property="invoice_id", type="string"),
-     *                     @OA\Property(property="products", type="array",
-     *                         @OA\Items(type="object",
-     *                             @OA\Property(property="id", type="string"),
-     *                             @OA\Property(property="quantity", type="integer", minimum=1)
-     *                         )
-     *                     ),
-     *                     @OA\Property(property="reason", type="string")
+     *             required={"invoice_id", "products", "reason"},
+     *             @OA\Property(property="invoice_id", type="string", description="Original receipt invoice_no or ID"),
+     *             @OA\Property(property="external_reference", type="string", description="Optional external reference for idempotency"),
+     *             @OA\Property(property="invoice_no", type="string", description="Optional custom invoice number (default: DN-{timestamp})"),
+     *             @OA\Property(property="products", type="array",
+     *                 @OA\Items(type="object",
+     *                     @OA\Property(property="id", type="string", description="Product panier_id"),
+     *                     @OA\Property(property="quantity", type="integer", minimum=1)
      *                 )
      *             ),
-     *             @OA\Property(property="zimra_fiscalize", type="boolean", default=false)
+     *             @OA\Property(property="reason", type="string", description="Reason for debit note (mandatory)"),
+     *             @OA\Property(property="customer_id", type="string", description="Optional customer panier_id")
      *         )
      *     ),
-     *     @OA\Response(response=201, description="Successfully created the debit notes"),
+     *     @OA\Response(response=201, description="Successfully created the debit note"),
      *     @OA\Response(response=400, description="Request Body Validation Error"),
      *     @OA\Response(response=402, description="Expired Panier company subscription"),
      *     @OA\Response(response=403, description="Incorrect API Credentials"),
@@ -51,17 +49,24 @@ class DebitNoteController extends BaseController
     public function create(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'data' => 'required|array|min:1|max:50',
-            'data.*.invoice_id' => 'required|string',
-            'data.*.products' => 'required|array|min:1',
-            'data.*.reason' => 'required|string',
-            'zimra_fiscalize' => 'boolean',
+            'invoice_id' => 'required|string',
+            'external_reference' => 'nullable|string|max:255',
+            'invoice_no' => 'nullable|string|max:255',
+            'products' => 'required|array|min:1',
+            // Support both legacy format (id) and new format (name, price, taxID)
+            'products.*.id' => 'nullable|string',
+            'products.*.name' => 'nullable|string',
+            'products.*.price' => 'nullable|numeric',
+            'products.*.quantity' => 'required|numeric|min:0.01',
+            'products.*.taxID' => 'nullable|integer',
+            'products.*.taxPercent' => 'nullable|numeric',
+            'products.*.taxCode' => 'nullable|string',
+            'products.*.receiptLineHSCode' => 'nullable|string',
+            'reason' => 'required|string|min:10',
+            'customer_id' => 'nullable|string',
         ]);
 
-        $result = $this->dbService->createDebitNotes(
-            $validated['data'],
-            $validated['zimra_fiscalize'] ?? false
-        );
+        $result = $this->dbService->createDebitNote($validated);
         return $this->successResponse($result, 201);
     }
 
@@ -140,24 +145,21 @@ class DebitNoteController extends BaseController
 
     /**
      * @OA\Post(
-     *     path="/debit-note/delete",
-     *     summary="Delete debit notes",
-     *     description="Delete debit notes in your Panier company",
-     *     operationId="deleteDebitNotes",
+     *     path="/debit-notes/void",
+     *     summary="Void a debit note",
+     *     description="Void a debit note by creating a reversing credit note. Fiscal documents cannot be deleted.",
+     *     operationId="voidDebitNote",
      *     tags={"Debit Notes"},
      *     security={{"AppId": {}, "ApiKey": {}}},
      *     @OA\RequestBody(
      *         required=true,
      *         @OA\JsonContent(
-     *             required={"data"},
-     *             @OA\Property(property="data", type="array", minItems=1, maxItems=1000,
-     *                 @OA\Items(type="object", required={"id"},
-     *                     @OA\Property(property="id", type="string")
-     *                 )
-     *             )
+     *             required={"receipt_id", "reason"},
+     *             @OA\Property(property="receipt_id", type="integer", description="Receipt ID to void"),
+     *             @OA\Property(property="reason", type="string", description="Reason for voiding")
      *         )
      *     ),
-     *     @OA\Response(response=200, description="Successfully deleted the debit notes"),
+     *     @OA\Response(response=200, description="Successfully voided the debit note"),
      *     @OA\Response(response=400, description="Request Body Validation Error"),
      *     @OA\Response(response=402, description="Expired Panier company subscription"),
      *     @OA\Response(response=403, description="Incorrect API Credentials"),
@@ -165,14 +167,8 @@ class DebitNoteController extends BaseController
      *     @OA\Response(response=429, description="Rate Limit exceeded")
      * )
      */
-    public function delete(Request $request): JsonResponse
+    public function void(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'data' => 'required|array|min:1|max:1000',
-            'data.*.id' => 'required|string',
-        ]);
-
-        $result = $this->dbService->deleteDebitNotes($validated['data']);
-        return $this->successResponse($result);
+        return $this->errorResponse('Void functionality not yet implemented. Use credit notes to reverse debit notes.', 501);
     }
 }
