@@ -150,7 +150,7 @@ class ReceiptFactory
      */
     public function buildBuyerData($customer): array
     {
-        return [
+        $buyerData = [
             'buyerRegisterName' => $customer->name,
             'buyerTradeName' => $customer->name,
             'buyerTIN' => $customer->tax_id ?? '',
@@ -164,6 +164,13 @@ class ReceiptFactory
                 'country' => 'ZW',
             ],
         ];
+
+        // Add VAT number if available in panier_data
+        if (isset($customer->panier_data['vat_number']) && !empty($customer->panier_data['vat_number'])) {
+            $buyerData['vatNumber'] = $customer->panier_data['vat_number'];
+        }
+
+        return $buyerData;
     }
 
     /**

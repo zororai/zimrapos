@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -7,27 +7,11 @@
     <style>
         @page {
             margin: 15mm;
-            margin-top: 20mm;
         }
         
         @media print {
             body { margin: 0; }
             .no-print { display: none !important; }
-        }
-        
-        /* Ensure content that breaks to next page has proper spacing */
-        .invoice-details,
-        .items-table,
-        .totals-section,
-        .party-box,
-        div[style*="margin: 15px 0"] {
-            page-break-inside: avoid;
-        }
-        
-        /* Add top padding for content on new pages */
-        .items-table,
-        .totals-section {
-            margin-top: 20px;
         }
         
         * {
@@ -49,7 +33,6 @@
             margin: 0 auto;
             background: white;
             padding: 10mm;
-            padding-bottom: 220px;
         }
         
         .header {
@@ -83,47 +66,6 @@
         .qr-code {
             display: inline-block;
             margin: 10px 0;
-        }
-        
-        .receipt-footer {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            text-align: center;
-            padding: 10px 15mm;
-            background: #fff;
-        }
-        
-        .receipt-footer .verification-title {
-            font-size: 8pt;
-            font-weight: bold;
-            margin-bottom: 3px;
-        }
-        
-        .receipt-footer .verification-code {
-            font-size: 9pt;
-            font-weight: bold;
-            letter-spacing: 1px;
-            margin-bottom: 5px;
-        }
-        
-        .receipt-footer .qr-code {
-            display: inline-block;
-            margin: 5px 0;
-        }
-        
-        .receipt-footer .verify-text {
-            font-size: 7pt;
-            color: #666;
-            margin-top: 3px;
-        }
-        
-        .receipt-footer .verification-url {
-            font-size: 6pt;
-            word-break: break-all;
-            color: #0066cc;
-            margin: 3px 0;
         }
         
         .invoice-title {
@@ -303,13 +245,39 @@
             $isVatRegistered = $vatNumber && $vatNumber !== 'NOT_REGISTERED';
         @endphp
         
-        <div class="header">
-            <div class="company-logo">
-                <!-- Logo placeholder - add your company logo here -->
-                <div style="width: 60px; height: 60px; border: 1px solid #000; display: flex; align-items: center; justify-content: center; font-size: 8pt; margin: 0 auto;">LOGO</div>
+        <!-- Header with Logo on Left and QR Code on Right -->
+        <div style="display: table; width: 100%; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #000;">
+            <div style="display: table-cell; width: 30%; vertical-align: top;">
+                <div class="company-logo">
+                    <!-- Logo placeholder - add your company logo here -->
+                    <div style="width: 80px; height: 80px; border: 1px solid #000; display: flex; align-items: center; justify-content: center; font-size: 8pt;">LOGO</div>
+                </div>
             </div>
-            <div class="invoice-title" style="margin-top: 10px;">
-                FISCAL TAX INVOICE
+            <div style="display: table-cell; width: 40%; vertical-align: middle; text-align: center;">
+                <div class="invoice-title" style="font-size: 14pt; font-weight: bold;">
+                    FISCAL TAX INVOICE
+                </div>
+            </div>
+            <div style="display: table-cell; width: 30%; vertical-align: top; text-align: right;">
+                <div style="border: 1px solid #ddd; border-radius: 8px; padding: 10px; background: #f9fafb;">
+                    <div style="font-size: 8pt; font-weight: bold; margin-bottom: 3px;">Verification Code</div>
+                    @if(isset($verificationCode) && $verificationCode)
+                        <div style="font-size: 8pt; color: #0066cc; margin-bottom: 5px;">{{ $verificationCode }}</div>
+                    @elseif($receipt->verification_code)
+                        <div style="font-size: 8pt; color: #0066cc; margin-bottom: 5px;">{{ $receipt->verification_code }}</div>
+                    @endif
+                    @if(isset($qrCodeBase64) && $qrCodeBase64)
+                        <div class="qr-code">
+                            <img src="{{ $qrCodeBase64 }}" width="80" height="80" alt="QR Code">
+                        </div>
+                    @endif
+                    @if($receipt->receipt_qr_code)
+                        <div style="font-size: 6pt; margin-top: 5px; word-break: break-all; line-height: 1.3;">
+                            <a href="{{ $receipt->receipt_qr_code }}" style="color: #0066cc; text-decoration: none;">{{ $receipt->receipt_qr_code }}</a>
+                        </div>
+                        <div style="font-size: 7pt; margin-top: 3px; color: #666;">Scan to verify</div>
+                    @endif
+                </div>
             </div>
         </div>
         
@@ -538,13 +506,13 @@
         <div style="margin-top: 20px; display: table; width: 100%;">
             <!-- Left Column: Payment Info and Terms -->
             <div style="display: table-cell; width: 50%; vertical-align: top; padding-right: 10px;">
-                <div style="padding: 15px; background: #f9fafb; border-radius: 4px; font-size: 9pt;">
-                    <div style="margin-bottom: 12px;">
-                        <strong style="font-size: 10pt; color: #1f2937;">Payment Information</strong><br>
+                <div style="padding: 10px; background: #f9fafb; border-radius: 4px; font-size: 7pt;">
+                    <div style="margin-bottom: 8px;">
+                        <strong style="font-size: 8pt; color: #1f2937;">Payment Information</strong><br>
                         <span style="color: #4b5563;">Please make all payments to our CBZ Bank Account <strong>0100000000</strong></span>
                     </div>
                     <div>
-                        <strong style="font-size: 10pt; color: #1f2937;">Terms and Conditions</strong><br>
+                        <strong style="font-size: 8pt; color: #1f2937;">Terms and Conditions</strong><br>
                         <span style="color: #4b5563;">This invoice will be considered invalid when the payment due date has lapsed.</span>
                     </div>
                 </div>
@@ -553,13 +521,13 @@
             <!-- Right Column: Tax Summary -->
             <div style="display: table-cell; width: 50%; vertical-align: top; padding-left: 10px;">
                 <div class="totals-section">
-                    <table class="tax-summary-table" style="width: 100%;">
+                    <table class="tax-summary-table" style="width: 100%; font-size: 8pt;">
                         <tr class="subtotal-row">
-                            <td style="width: 60%;"><strong>Sub Total</strong><br><span style="font-size: 8pt; color: #666;">(excl. Tax)</span></td>
+                            <td style="width: 60%;"><strong>Sub Total</strong><br><span style="font-size: 7pt; color: #666;">(excl. Tax)</span></td>
                             <td style="width: 40%;" class="text-right"><strong>{{ $receipt->receipt_currency }} {{ number_format($subtotal, 2) }}</strong></td>
                         </tr>
                         <tr>
-                            <th colspan="2">Tax Summary</th>
+                            <th colspan="2" style="font-size: 8pt;">Tax Summary</th>
                         </tr>
                         @foreach($taxBreakdown as $label => $amount)
                         <tr class="tax-row">
@@ -575,26 +543,6 @@
                 </div>
             </div>
         </div>
-    </div>
-    
-    <div class="receipt-footer">
-        <div class="verification-title">Verification Code</div>
-        @if(isset($verificationCode) && $verificationCode)
-            <div class="verification-code">{{ $verificationCode }}</div>
-        @elseif($receipt->verification_code)
-            <div class="verification-code">{{ $receipt->verification_code }}</div>
-        @endif
-        @if(isset($qrCodeBase64) && $qrCodeBase64)
-            <div class="qr-code">
-                <img src="{{ $qrCodeBase64 }}" width="100" height="100" alt="QR Code">
-            </div>
-        @endif
-        @if($receipt->receipt_qr_code)
-            <div class="verification-url">
-                <a href="{{ $receipt->receipt_qr_code }}" style="color: #0066cc;">{{ $receipt->receipt_qr_code }}</a>
-            </div>
-        @endif
-        <div class="verify-text">Scan to verify receipt</div>
     </div>
     
     <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
