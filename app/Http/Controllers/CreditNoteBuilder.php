@@ -139,9 +139,12 @@ class CreditNoteBuilder
             // receiptPayments omitted - will be auto-filled by buildAndValidateReceiptBCMath
         ];
 
-        // CRITICAL: Do NOT include buyerData in credit notes
-        // Credit notes reference the original receipt via creditDebitNote
-        // Including buyerData can cause RCPT035 validation errors if TIN format is invalid
+        // Copy buyer data from original receipt for PDF display
+        // NOTE: This is stored in the database but NOT sent to FDMS API
+        // The credit note references the original via creditDebitNote
+        if ($originalReceipt->buyer_data) {
+            $creditNotePayload['buyerData'] = $originalReceipt->buyer_data;
+        }
 
         return $creditNotePayload;
     }

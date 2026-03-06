@@ -829,6 +829,7 @@
                                     <template x-for="(line, index) in receiptForm.receiptLines" :key="index">
                                         <div class="mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
                                             <div class="flex items-center space-x-2 mb-2">
+                                                <input type="text" x-model="line.productCode" placeholder="Product Code (e.g. SHOE-001)" class="w-32 px-3 py-2 border border-gray-300 rounded-lg text-sm">
                                                 <input type="text" x-model="line.receiptLineName" placeholder="Product Name" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm" required>
                                                 <input type="number" x-model.number="line.receiptLineQuantity" placeholder="Qty" class="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm" min="1" required>
                                                 <input type="number" x-model.number="line.receiptLinePrice" placeholder="Price" step="0.01" class="w-24 px-3 py-2 border border-gray-300 rounded-lg text-sm" required>

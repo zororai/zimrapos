@@ -33,25 +33,24 @@
             margin: 0 auto;
             background: white;
             padding: 10mm;
-            padding-bottom: 140px;
+            padding-bottom: 220px;
         }
         
         .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
+            text-align: center;
             margin-bottom: 20px;
             padding-bottom: 10px;
             border-bottom: 2px solid #000;
         }
         
         .company-logo {
-            flex: 0 0 80px;
+            margin: 0 auto 10px;
+            width: 60px;
         }
         
         .company-logo img {
-            max-width: 80px;
-            max-height: 80px;
+            max-width: 60px;
+            max-height: 60px;
         }
         
         .verification-section {
@@ -281,12 +280,11 @@
         <div class="header">
             <div class="company-logo">
                 <!-- Logo placeholder - add your company logo here -->
-                <div style="width: 60px; height: 60px; border: 1px solid #000; display: flex; align-items: center; justify-content: center; font-size: 8pt;">LOGO</div>
+                <div style="width: 60px; height: 60px; border: 1px solid #000; display: flex; align-items: center; justify-content: center; font-size: 8pt; margin: 0 auto;">LOGO</div>
             </div>
-        </div>
-        
-        <div class="invoice-title">
-            FISCAL TAX INVOICE
+            <div class="invoice-title" style="margin-top: 10px;">
+                FISCAL TAX INVOICE
+            </div>
         </div>
         
         <div class="parties-section">
@@ -426,7 +424,15 @@
                     }
                 @endphp
                 <tr @if($isDiscount) style="background-color: #fff8dc;" @endif>
-                    <td>{{ $line['receiptLineHSCode'] ?? ($index + 1) }}</td>
+                    <td style="font-family: monospace; font-size: 8pt;">
+                        @php
+                            $productName = $line['receiptLineName'] ?? 'Item';
+                            // Extract first 5 letters, uppercase, remove non-letters
+                            $prefix = strtoupper(substr(preg_replace('/[^a-zA-Z]/', '', $productName), 0, 5));
+                            $generatedCode = ($prefix ?: 'ITEM') . '-' . str_pad($index + 1, 3, '0', STR_PAD_LEFT);
+                        @endphp
+                        {{ $generatedCode }}
+                    </td>
                     <td>
                         @if($isDiscount)
                             <em style="color: #d97706;">{{ $line['receiptLineName'] ?? 'Discount' }}</em>
@@ -523,8 +529,15 @@
             </table>
         </div>
         
-        <div class="footer-note">
-            Invoice is issued after purchasing goods according to agreement No.555
+        <div style="margin-top: 20px; padding: 15px; background: #f9fafb; border-radius: 4px; font-size: 9pt;">
+            <div style="margin-bottom: 12px;">
+                <strong style="font-size: 10pt; color: #1f2937;">Payment Information</strong><br>
+                <span style="color: #4b5563;">Please make all payments to our CBZ Bank Account <strong>0100000000</strong></span>
+            </div>
+            <div>
+                <strong style="font-size: 10pt; color: #1f2937;">Terms and Conditions</strong><br>
+                <span style="color: #4b5563;">This invoice will be considered invalid when the payment due date has lapsed.</span>
+            </div>
         </div>
     </div>
     

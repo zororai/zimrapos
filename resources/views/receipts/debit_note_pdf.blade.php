@@ -33,25 +33,24 @@
             margin: 0 auto;
             background: white;
             padding: 10mm;
-            padding-bottom: 140px;
+            padding-bottom: 220px;
         }
         
         .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
+            text-align: center;
             margin-bottom: 20px;
             padding-bottom: 10px;
             border-bottom: 3px solid #dc2626;
         }
         
         .company-logo {
-            flex: 0 0 80px;
+            margin: 0 auto 10px;
+            width: 60px;
         }
         
         .company-logo img {
-            max-width: 80px;
-            max-height: 80px;
+            max-width: 60px;
+            max-height: 60px;
         }
         
         .debit-note-badge {
@@ -62,6 +61,8 @@
             font-weight: bold;
             font-size: 11pt;
             text-transform: uppercase;
+            display: inline-block;
+            margin-top: 10px;
         }
         
         .invoice-title {
@@ -316,15 +317,14 @@
         
         <div class="header">
             <div class="company-logo">
-                <div style="width: 60px; height: 60px; border: 2px solid #dc2626; display: flex; align-items: center; justify-content: center; font-size: 8pt; color: #dc2626; font-weight: bold;">LOGO</div>
+                <div style="width: 60px; height: 60px; border: 2px solid #dc2626; display: flex; align-items: center; justify-content: center; font-size: 8pt; color: #dc2626; font-weight: bold; margin: 0 auto;">LOGO</div>
             </div>
             <div class="debit-note-badge">
                 DEBIT NOTE
             </div>
-        </div>
-        
-        <div class="invoice-title">
-            FISCAL TAX DEBIT NOTE
+            <div class="invoice-title" style="margin-top: 10px;">
+                FISCAL TAX DEBIT NOTE
+            </div>
         </div>
         
         <div class="parties-section">
@@ -415,8 +415,8 @@
         <table class="items-table">
             <thead>
                 <tr>
-                    <th style="width: 5%;">No.</th>
-                    <th style="width: 35%;">Description</th>
+                    <th style="width: 8%;">Code</th>
+                    <th style="width: 32%;">Description</th>
                     <th class="text-center" style="width: 12%;">Adjustment Qty</th>
                     <th class="text-right" style="width: 12%;">Unit Price<br>({{ $receipt->receipt_currency }})</th>
                     <th class="text-right" style="width: 12%;">Amount<br>(excl. Tax)<br>({{ $receipt->receipt_currency }})</th>
@@ -444,7 +444,15 @@
                     }
                 @endphp
                 <tr>
-                    <td class="text-center">{{ $index + 1 }}</td>
+                    <td style="font-family: monospace; font-size: 8pt;">
+                        @php
+                            $productName = $line['receiptLineName'] ?? 'Item';
+                            // Extract first 5 letters, uppercase, remove non-letters
+                            $prefix = strtoupper(substr(preg_replace('/[^a-zA-Z]/', '', $productName), 0, 5));
+                            $generatedCode = ($prefix ?: 'ITEM') . '-' . str_pad($index + 1, 3, '0', STR_PAD_LEFT);
+                        @endphp
+                        {{ $generatedCode }}
+                    </td>
                     <td>
                         <strong>{{ $line['receiptLineName'] ?? 'Item' }}</strong>
                         @if(isset($line['receiptLineHSCode']) && $line['receiptLineHSCode'] != '0000')
@@ -510,8 +518,15 @@
             </table>
         </div>
         
-        <div class="footer-note">
-            This is an official ZIMRA fiscalized debit note. The amount shown represents the adjustment to the original invoice.
+        <div style="margin-top: 20px; padding: 15px; background: #f9fafb; border-radius: 4px; font-size: 9pt;">
+            <div style="margin-bottom: 12px;">
+                <strong style="font-size: 10pt; color: #1f2937;">Payment Information</strong><br>
+                <span style="color: #4b5563;">Please make all payments to our CBZ Bank Account <strong>0100000000</strong></span>
+            </div>
+            <div>
+                <strong style="font-size: 10pt; color: #1f2937;">Terms and Conditions</strong><br>
+                <span style="color: #4b5563;">This invoice will be considered invalid when the payment due date has lapsed.</span>
+            </div>
         </div>
     </div>
     
