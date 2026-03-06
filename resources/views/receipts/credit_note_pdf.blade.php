@@ -7,11 +7,27 @@
     <style>
         @page {
             margin: 15mm;
+            margin-top: 20mm;
         }
         
         @media print {
             body { margin: 0; }
             .no-print { display: none !important; }
+        }
+        
+        /* Ensure content that breaks to next page has proper spacing */
+        .invoice-details,
+        .items-table,
+        .totals-section,
+        .party-box,
+        div[style*="margin: 15px 0"] {
+            page-break-inside: avoid;
+        }
+        
+        /* Add top padding for content on new pages */
+        .items-table,
+        .totals-section {
+            margin-top: 20px;
         }
         
         * {
@@ -291,20 +307,43 @@
             $companyName = $config->company_name ?? 'Company Name';
             $companyTin = $config->company_tin ?? 'TIN Number';
             
+            // Get VAT registration status from receipt or config
+            $vatNumber = null;
+            if (isset($receipt->vat_number)) {
+                $vatNumber = $receipt->vat_number;
+            } elseif ($config && isset($config->vat_number)) {
+                $vatNumber = $config->vat_number;
+            }
+            
+            $isVatRegistered = $vatNumber && $vatNumber !== 'NOT_REGISTERED';
+            
             // Get original receipt reference for credit note (FDMS spec items [24]-[28])
             $originalReceipt = null;
             $originalReceiptNo = null;
             $originalReceiptDate = null;
             $originalReceiptGlobalNo = null;
             $originalDeviceSerialNo = null;
-            if (isset($receipt->original_receipt_id)) {
+            
+            // Try to find original receipt from creditDebitNote data or original_receipt_id
+            if (isset($receipt->credit_debit_note['receiptGlobalNo'])) {
+                $originalReceipt = \App\Models\Receipt::where('receipt_global_no', $receipt->credit_debit_note['receiptGlobalNo'])
+                    ->where('device_id', $receipt->credit_debit_note['deviceID'] ?? $receipt->device_id)
+                    ->first();
+            } elseif (isset($receipt->original_receipt_id)) {
                 $originalReceipt = \App\Models\Receipt::find($receipt->original_receipt_id);
-                if ($originalReceipt) {
-                    $originalReceiptNo = $originalReceipt->invoice_no;
-                    $originalReceiptDate = $originalReceipt->receipt_date;
-                    $originalReceiptGlobalNo = $originalReceipt->receipt_global_no;
-                    $originalConfig = \App\Models\ZimraConfig::where('device_id', $originalReceipt->device_id)->first();
-                    $originalDeviceSerialNo = $originalConfig->serial_number ?? $originalReceipt->device_id;
+            }
+            
+            if ($originalReceipt) {
+                $originalReceiptNo = $originalReceipt->invoice_no;
+                // [27] Receipt Date: Use credit note creation date, not original invoice date
+                $originalReceiptDate = $receipt->created_at ?? $receipt->receipt_date;
+                $originalReceiptGlobalNo = $originalReceipt->receipt_global_no;
+                $originalConfig = \App\Models\ZimraConfig::where('device_id', $originalReceipt->device_id)->first();
+                $originalDeviceSerialNo = $originalConfig->serial_number ?? $originalReceipt->device_id;
+                
+                // FALLBACK: If credit note doesn't have buyer data, use original invoice's buyer data
+                if (!$receipt->buyer_data && $originalReceipt->buyer_data) {
+                    $receipt->buyer_data = $originalReceipt->buyer_data;
                 }
             }
         @endphp
@@ -330,6 +369,11 @@
                             <div class="party-info">
                                 <strong>{{ $companyName }}</strong><br>
                                 TIN: {{ $companyTin }}<br>
+                                @if($isVatRegistered)
+                                    VAT: {{ $vatNumber }}<br>
+                                @else
+                                    VAT: Not Registered<br>
+                                @endif
                                 @if($config && $config->company_address)
                                     {{ $config->company_address }}<br>
                                 @endif
@@ -389,22 +433,22 @@
             </table>
         </div>
         
-        <!-- FDMS Spec Items [17]-[23]: Current Receipt Information -->
+        <!-- Current Receipt Information -->
         <div class="invoice-details" style="display: table; width: 100%; margin: 15px 0;">
             <div style="display: table-row;">
-                <div style="display: table-cell; width: 50%; padding: 5px; font-size: 9pt;">[17] Invoice No (Receipt Counter): <strong>{{ $receipt->receipt_counter ?? 'N/A' }}</strong></div>
-                <div style="display: table-cell; width: 50%; padding: 5px; font-size: 9pt;">[18] Invoice No (Receipt Global No): <strong>{{ $receipt->receipt_global_no }}</strong></div>
+                <div style="display: table-cell; width: 50%; padding: 5px; font-size: 9pt;">Invoice No (Receipt Counter): <strong>{{ $receipt->receipt_counter ?? 'N/A' }}</strong></div>
+                <div style="display: table-cell; width: 50%; padding: 5px; font-size: 9pt;">Invoice No (Receipt Global No): <strong>{{ $receipt->receipt_global_no }}</strong></div>
             </div>
             <div style="display: table-row;">
-                <div style="display: table-cell; width: 50%; padding: 5px; font-size: 9pt;">[19] Fiscal Day No: <strong>{{ $receipt->fiscal_day_no }}</strong></div>
-                <div style="display: table-cell; width: 50%; padding: 5px; font-size: 9pt;">[20] Customer Reference No: <strong>{{ $receipt->invoice_no }}</strong></div>
+                <div style="display: table-cell; width: 50%; padding: 5px; font-size: 9pt;">Fiscal Day No: <strong>{{ $receipt->fiscal_day_no }}</strong></div>
+                <div style="display: table-cell; width: 50%; padding: 5px; font-size: 9pt;">Customer Reference No: <strong>{{ $receipt->invoice_no }}</strong></div>
             </div>
             <div style="display: table-row;">
-                <div style="display: table-cell; width: 50%; padding: 5px; font-size: 9pt;">[21] Device Serial No: <strong>{{ $config->serial_number ?? $receipt->device_id }}</strong></div>
-                <div style="display: table-cell; width: 50%; padding: 5px; font-size: 9pt;">[22] Device ID: <strong>{{ $receipt->device_id }}</strong></div>
+                <div style="display: table-cell; width: 50%; padding: 5px; font-size: 9pt;">Device Serial No: <strong>{{ $config->serial_number ?? $receipt->device_id }}</strong></div>
+                <div style="display: table-cell; width: 50%; padding: 5px; font-size: 9pt;">Device ID: <strong>{{ $receipt->device_id }}</strong></div>
             </div>
             <div style="display: table-row;">
-                <div style="display: table-cell; width: 100%; padding: 5px; font-size: 9pt;" colspan="2">[23] Receipt Date and Time: <strong>{{ $receipt->receipt_date->format('d/m/Y H:i:s') }}</strong></div>
+                <div style="display: table-cell; width: 100%; padding: 5px; font-size: 9pt;" colspan="2">Receipt Date and Time: <strong>{{ $receipt->receipt_date->format('d/m/Y H:i:s') }}</strong></div>
             </div>
             @if(isset($receipt->date_issued))
             <div style="display: table-row;">
@@ -418,27 +462,21 @@
             @endif
         </div>
         
-        <!-- FDMS Spec Items [24]-[28]: Credited Invoice Information Block -->
+        <!-- Credited Invoice Information Block -->
         @if($originalReceipt)
         <div style="margin: 15px 0; padding: 10px; border: 2px solid #0052a3; background: #eff6ff;">
             <div style="font-weight: bold; font-size: 10pt; margin-bottom: 8px; color: #0052a3;">
-                [24] Credited Invoice
+                Credited Invoice
             </div>
             <div style="font-size: 9pt; line-height: 1.6;">
-                <div>[25] Device Serial No: <strong>{{ $originalDeviceSerialNo }}</strong></div>
-                <div>[26] Invoice No (Receipt Global No): <strong>{{ $originalReceiptGlobalNo }}</strong></div>
-                <div>[27] Receipt Date: <strong>{{ $originalReceiptDate->format('d/m/Y H:i:s') }}</strong></div>
-                <div>[28] Customer Reference No: <strong>{{ $originalReceiptNo }}</strong></div>
+                <div>Device Serial No: <strong>{{ $originalDeviceSerialNo }}</strong></div>
+                <div>Invoice No (Receipt Global No): <strong>{{ $originalReceiptGlobalNo }}</strong></div>
+                <div>Receipt Date: <strong>{{ $originalReceiptDate->format('d/m/Y H:i:s') }}</strong></div>
+                <div>Customer Reference No: <strong>{{ $originalReceiptNo }}</strong></div>
                 @if($receipt->receipt_notes)
                 <div style="margin-top: 8px;"><strong>Reason:</strong> {{ $receipt->receipt_notes }}</div>
                 @endif
             </div>
-        </div>
-        @endif
-        
-        @if($receipt->receipt_notes)
-        <div style="background: #eff6ff; border-left: 4px solid #0052a3; padding: 12px; margin: 15px 0; font-size: 9pt;">
-            ⚠️ <strong>Reason for Credit Note:</strong> {{ $receipt->receipt_notes }}
         </div>
         @endif
         
@@ -562,39 +600,44 @@
             $grandTotal = abs($receipt->receipt_total);
         @endphp
         
-        <div class="totals-section">
-            <table class="tax-summary-table">
-                <tr class="subtotal-row">
-                    <td style="width: 60%;"><strong>Sub Total</strong><br><span style="font-size: 8pt; color: #666;">(excl. Tax)</span></td>
-                    <td style="width: 15%; text-align: center;"></td>
-                    <td style="width: 25%;" class="text-right"><strong>{{ $receipt->receipt_currency }} {{ number_format($subtotal, 2) }}</strong></td>
-                </tr>
-                <tr>
-                    <th colspan="3">Tax Summary</th>
-                </tr>
-                @foreach($taxBreakdown as $label => $amount)
-                <tr class="tax-row">
-                    <td style="padding-left: 20px;">{{ $label }}</td>
-                    <td></td>
-                    <td class="text-right">{{ $receipt->receipt_currency }} {{ number_format($amount, 2) }}</td>
-                </tr>
-                @endforeach
-                <tr class="grand-total-row">
-                    <td><strong>Grand Total</strong></td>
-                    <td class="text-right"><strong>{{ $receipt->receipt_currency }}</strong></td>
-                    <td class="text-right"><strong>{{ number_format($grandTotal, 2) }}</strong></td>
-                </tr>
-            </table>
-        </div>
-        
-        <div style="margin-top: 20px; padding: 15px; background: #f9fafb; border-radius: 4px; font-size: 9pt;">
-            <div style="margin-bottom: 12px;">
-                <strong style="font-size: 10pt; color: #1f2937;">Payment Information</strong><br>
-                <span style="color: #4b5563;">Please make all payments to our CBZ Bank Account <strong>0100000000</strong></span>
+        <div style="margin-top: 20px; display: table; width: 100%;">
+            <!-- Left Column: Payment Info and Terms -->
+            <div style="display: table-cell; width: 50%; vertical-align: top; padding-right: 10px;">
+                <div style="padding: 15px; background: #f9fafb; border-radius: 4px; font-size: 9pt;">
+                    <div style="margin-bottom: 12px;">
+                        <strong style="font-size: 10pt; color: #1f2937;">Payment Information</strong><br>
+                        <span style="color: #4b5563;">Please make all payments to our CBZ Bank Account <strong>0100000000</strong></span>
+                    </div>
+                    <div>
+                        <strong style="font-size: 10pt; color: #1f2937;">Terms and Conditions</strong><br>
+                        <span style="color: #4b5563;">This invoice will be considered invalid when the payment due date has lapsed.</span>
+                    </div>
+                </div>
             </div>
-            <div>
-                <strong style="font-size: 10pt; color: #1f2937;">Terms and Conditions</strong><br>
-                <span style="color: #4b5563;">This invoice will be considered invalid when the payment due date has lapsed.</span>
+            
+            <!-- Right Column: Tax Summary -->
+            <div style="display: table-cell; width: 50%; vertical-align: top; padding-left: 10px;">
+                <div class="totals-section">
+                    <table class="tax-summary-table" style="width: 100%;">
+                        <tr class="subtotal-row">
+                            <td style="width: 60%;"><strong>Sub Total</strong><br><span style="font-size: 8pt; color: #666;">(excl. Tax)</span></td>
+                            <td style="width: 40%;" class="text-right"><strong>{{ $receipt->receipt_currency }} {{ number_format($subtotal, 2) }}</strong></td>
+                        </tr>
+                        <tr>
+                            <th colspan="2">Tax Summary</th>
+                        </tr>
+                        @foreach($taxBreakdown as $label => $amount)
+                        <tr class="tax-row">
+                            <td style="padding-left: 20px;">{{ $label }}</td>
+                            <td class="text-right">{{ $receipt->receipt_currency }} {{ number_format($amount, 2) }}</td>
+                        </tr>
+                        @endforeach
+                        <tr class="grand-total-row">
+                            <td><strong>Grand Total</strong></td>
+                            <td class="text-right"><strong>{{ $receipt->receipt_currency }} {{ number_format($grandTotal, 2) }}</strong></td>
+                        </tr>
+                    </table>
+                </div>
             </div>
         </div>
     </div>

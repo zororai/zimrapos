@@ -2238,10 +2238,22 @@ class ZimraDeviceService
         // Non-VAT devices use FiscalInvoice with 0% tax
         $defaultReceiptType = 'FiscalInvoice';
         
+        // For credit/debit notes, extract original_receipt_id from creditDebitNote
+        $originalReceiptId = null;
+        if (isset($receiptData['creditDebitNote']['receiptGlobalNo'])) {
+            $originalReceipt = Receipt::where('receipt_global_no', $receiptData['creditDebitNote']['receiptGlobalNo'])
+                ->where('device_id', $receiptData['creditDebitNote']['deviceID'] ?? $deviceId)
+                ->first();
+            if ($originalReceipt) {
+                $originalReceiptId = $originalReceipt->id;
+            }
+        }
+
         $receipt = Receipt::create([
             'device_id' => $deviceId,
             'invoice_no' => $receiptData['invoiceNo'] ?? 'N/A',
             'receipt_type' => $receiptData['receiptType'] ?? $defaultReceiptType,
+            'original_receipt_id' => $originalReceiptId,
             'receipt_currency' => $receiptData['receiptCurrency'] ?? 'USD',
             'receipt_counter' => $receiptData['receiptCounter'],
             'receipt_global_no' => $receiptData['receiptGlobalNo'],
@@ -2263,7 +2275,12 @@ class ZimraDeviceService
             'zimra_response' => $responseData,
             'receipt_date' => $receiptData['receiptDate'] ?? now(),
             'date_issued' => $receiptData['dateIssued'] ?? null,
-            'payment_due' => $receiptData['paymentDue'] ?? null,
+            'payment_due' => $receiptData['paymentDue'] ?? (
+                ($receiptData['receiptType'] ?? $defaultReceiptType) === 'FiscalInvoice' 
+                    ? now()->addWeeks(2)->format('Y-m-d') 
+                    : null
+            ),
+            'receipt_notes' => $receiptData['receiptNotes'] ?? null,
             'validation_code' => $receiptValidationCode,
             'validation_errors' => $parsedErrors,
             'is_valid' => $isValid,
@@ -2517,6 +2534,57 @@ class ZimraDeviceService
             'available_tax_codes' => array_keys($taxLookupByCode),
             'fiscal_day_no' => $fiscalDayNo,
         ]);
+
+        /*
+        |--------------------------------------------------------------------------
+        | Sanitize Buyer Data (FDMS Validation)
+        |--------------------------------------------------------------------------
+        */
+        // CRITICAL: Credit/Debit notes should NOT include buyerData in FDMS submission
+        // They reference the original invoice via creditDebitNote
+        // Including buyerData causes RCPT035 validation errors
+        $receiptType = $receiptData['receiptType'] ?? 'FiscalInvoice';
+        if (in_array($receiptType, ['CreditNote', 'DebitNote'])) {
+            if (isset($receiptData['buyerData'])) {
+                Log::info('CREDIT_DEBIT_NOTE_BUYER_DATA_REMOVED', [
+                    'receipt_type' => $receiptType,
+                    'action' => 'Removing buyerData from FDMS payload (stored in DB for PDF only)'
+                ]);
+                unset($receiptData['buyerData']);
+            }
+        } elseif (isset($receiptData['buyerData'])) {
+            // For regular invoices, validate buyer data format
+            
+            // FDMS requires VAT number to be exactly 9 characters
+            if (isset($receiptData['buyerData']['vatNumber'])) {
+                $vatNum = trim($receiptData['buyerData']['vatNumber']);
+                if (strlen($vatNum) !== 9) {
+                    Log::warning('BUYER_VAT_INVALID_LENGTH', [
+                        'vat_number' => $vatNum,
+                        'length' => strlen($vatNum),
+                        'required_length' => 9,
+                        'action' => 'Removing from payload'
+                    ]);
+                    unset($receiptData['buyerData']['vatNumber']);
+                }
+            }
+            
+            // FDMS requires TIN to be exactly 10 digits (no letters or special chars)
+            if (isset($receiptData['buyerData']['buyerTIN'])) {
+                $tin = trim($receiptData['buyerData']['buyerTIN']);
+                if (!preg_match('/^\d{10}$/', $tin)) {
+                    Log::warning('BUYER_TIN_INVALID_FORMAT', [
+                        'tin' => $tin,
+                        'length' => strlen($tin),
+                        'required_format' => '10 digits only',
+                        'action' => 'Removing buyerData entirely to prevent RCPT035'
+                    ]);
+                    // Remove entire buyerData if TIN is invalid
+                    // FDMS validates TIN strictly and rejects the entire receipt
+                    unset($receiptData['buyerData']);
+                }
+            }
+        }
 
         /*
         |--------------------------------------------------------------------------

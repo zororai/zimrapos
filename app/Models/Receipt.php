@@ -128,4 +128,36 @@ class Receipt extends Model
         return $this->hasMany(Receipt::class, 'original_receipt_id')
             ->where('receipt_type', 'DebitNote');
     }
+
+    /**
+     * Get credit/debit note reference data for FDMS spec items [24]-[28]
+     * This accessor retrieves the creditDebitNote structure from zimra_response
+     * or constructs it from the original_receipt_id relationship
+     */
+    public function getCreditDebitNoteAttribute()
+    {
+        // For credit/debit notes only
+        if (!in_array($this->receipt_type, ['CreditNote', 'DebitNote'])) {
+            return null;
+        }
+
+        // Try to get from zimra_response first (if it was stored there)
+        if (isset($this->zimra_response['creditDebitNote'])) {
+            return $this->zimra_response['creditDebitNote'];
+        }
+
+        // If original_receipt_id is set, construct the creditDebitNote data
+        if ($this->original_receipt_id) {
+            $originalReceipt = $this->originalReceipt;
+            if ($originalReceipt) {
+                return [
+                    'deviceID' => $originalReceipt->device_id,
+                    'receiptGlobalNo' => $originalReceipt->receipt_global_no,
+                    'fiscalDayNo' => $originalReceipt->fiscal_day_no,
+                ];
+            }
+        }
+
+        return null;
+    }
 }
