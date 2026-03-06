@@ -819,72 +819,9 @@ class DatabaseService
 
     public function createDebitNote(array $noteData, bool $zimraFiscalize = true): array
     {
-        $invoiceId = $noteData['invoice_id'] ?? null;
-        $externalReference = $noteData['external_reference'] ?? null;
-        
-        if (!$invoiceId) {
-            throw new \Exception('invoice_id is required for debit note creation');
-        }
-
-        if (!isset($noteData['reason']) || empty($noteData['reason'])) {
-            throw new \Exception('reason is required for debit note creation');
-        }
-
-        // STEP 1: Validate original receipt exists and is fiscalized
-        $originalReceipt = \App\Models\Receipt::where('invoice_no', $invoiceId)
-            ->orWhere('id', $invoiceId)
-            ->first();
-        
-        if (!$originalReceipt) {
-            throw new \Exception("Original receipt with ID {$invoiceId} not found");
-        }
-
-        if (!$originalReceipt->fdms_receipt_id) {
-            throw new \Exception("Original receipt {$invoiceId} is not fiscalized. Cannot create debit note.");
-        }
-
-        if ($originalReceipt->is_voided) {
-            throw new \Exception("Original receipt {$invoiceId} is voided. Cannot create debit note.");
-        }
-
-        // STEP 2: Check for duplicate external reference
-        if ($externalReference) {
-            $existing = \App\Models\Receipt::where('external_reference', $externalReference)
-                ->where('receipt_type', 'DebitNote')
-                ->first();
-            
-            if ($existing) {
-                throw new \Exception("Debit note with external reference {$externalReference} already exists (Receipt ID: {$existing->id})");
-            }
-        }
-
-        // STEP 3: Validate currency and device match
-        $zimraConfig = \App\Models\ZimraConfig::getActive();
-        if (!$zimraConfig || !$zimraConfig->device_id) {
-            throw new \Exception('No active ZIMRA configuration found');
-        }
-
-        if ($originalReceipt->device_id !== $zimraConfig->device_id) {
-            throw new \Exception("Original receipt device_id does not match current device");
-        }
-
-        // STEP 4: Build receipt payload and submit to ZIMRA
-        if ($zimraFiscalize) {
-            $zimraResult = $this->submitDebitNoteToZimra($originalReceipt, $noteData);
-            
-            if (isset($zimraResult['error'])) {
-                throw new \Exception($zimraResult['message'] ?? 'ZIMRA submission failed');
-            }
-
-            // Return the created receipt from ZIMRA submission
-            return [
-                'success' => true,
-                'receipt' => $zimraResult['receipt'] ?? null,
-                'fdms_receipt_id' => $zimraResult['fdms_receipt_id'] ?? null,
-            ];
-        }
-
-        throw new \Exception('Debit notes must be fiscalized');
+        // Delegate to DebitNoteService
+        $debitNoteService = app(\App\Services\DebitNoteService::class);
+        return $debitNoteService->createDebitNote($noteData);
     }
 
     protected function submitDebitNoteToZimra(\App\Models\Receipt $originalReceipt, array $noteData): array
@@ -894,6 +831,19 @@ class DatabaseService
         
         $deviceId = $zimraConfig->device_id;
         $currencyCode = $originalReceipt->receipt_currency;
+
+        // Step 1: Load original receipt lines for delta calculation
+        $originalLines = $originalReceipt->receipt_lines ?? [];
+        if (is_string($originalLines)) {
+            $originalLines = json_decode($originalLines, true) ?? [];
+        }
+        $originalLinesByName = [];
+        foreach ($originalLines as $line) {
+            $lineName = $line['receiptLineName'] ?? '';
+            if ($lineName) {
+                $originalLinesByName[$lineName] = $line;
+            }
+        }
 
         $products = $noteData['products'] ?? [];
         $receiptLines = [];
@@ -934,6 +884,12 @@ class DatabaseService
                 $hsCode = $productModel->hs_code ?? '';
                 $name = $productModel->name;
             }
+
+            // Step 2: Calculate delta (correctedQty - originalQty)
+            $originalQty = isset($originalLinesByName[$name]) ? floatval($originalLinesByName[$name]['receiptLineQuantity'] ?? 0) : 0;
+            $deltaQty = round($quantity - $originalQty, 2);
+            if ($deltaQty <= 0) { continue; }
+            $quantity = $deltaQty;
 
             // For debit notes, use tax-exclusive pricing with BCMath for precision
             // FDMS spec for receiptLinesTaxInclusive = false:
@@ -1007,23 +963,29 @@ class DatabaseService
             'receiptLinesTaxInclusive' => false,
         ]);
 
+        // Validate: DebitNote must have positive delta lines
+        if (empty($receiptLines)) {
+            throw new \Exception('Invalid DebitNote: no positive delta (new qty must exceed original qty)');
+        }
+
         $receiptData = [
             'receiptType' => 'DebitNote',
             'receiptCurrency' => $currencyCode,
             'invoiceNo' => $noteData['invoice_no'] ?? 'DN-' . time(),
-            'receiptNotes' => $noteData['reason'],
-            'receiptLinesTaxInclusive' => false, // Tax-exclusive pricing for debit notes
+            'receiptDate' => now()->format('Y-m-d\TH:i:s'),
+            'receiptLinesTaxInclusive' => false,
+            'receiptLines' => $receiptLines,
+            'receiptTaxes' => $receiptTaxes,
+            'receiptPayments' => $receiptPayments,
+            'receiptTotal' => (float)$receiptTotal,
+            'receiptPrintForm' => 'Receipt48',
+            'receiptNotes' => 'Quantity adjustment',
             'creditDebitNote' => [
                 'creditDebitNoteReceiptGlobalNo' => $originalReceipt->receipt_global_no,
                 'creditDebitNoteDate' => $originalReceipt->receipt_date instanceof \Carbon\Carbon
                     ? $originalReceipt->receipt_date->format('Y-m-d\TH:i:s')
                     : $originalReceipt->receipt_date,
             ],
-            'receiptDate' => now()->format('Y-m-d\TH:i:s'),
-            'receiptLines' => $receiptLines,
-            'receiptTaxes' => $receiptTaxes,
-            'receiptPayments' => $receiptPayments,
-            'receiptTotal' => (float)$receiptTotal,
             'original_receipt_id' => $originalReceipt->id,
             'external_reference' => $noteData['external_reference'] ?? null,
         ];

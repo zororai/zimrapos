@@ -1,0 +1,50 @@
+{
+  "receipt": {
+    "receiptType": "DebitNote",
+    "receiptCurrency": "USD",
+    "receiptCounter": 33,
+    "receiptGlobalNo": 150,
+    "invoiceNo": "DN-1772768184",
+    "receiptDate": "2026-03-06T06:00:00",
+    "receiptLinesTaxInclusive": false,
+    "receiptLines": [
+      {
+        "receiptLineType": "Sale",
+        "receiptLineNo": 1,
+        "receiptLineHSCode": "",
+        "receiptLineName": "Leather shoes",
+        "receiptLinePrice": 40.0,
+        "receiptLineQuantity": 1.0,
+        "receiptLineTotal": 40.0,
+        "taxPercent": 0.0,
+        "taxID": 513,
+        "product_id": "12345"
+      }
+    ],
+    "receiptTaxes": [
+      {
+        "taxID": 513,
+        "taxPercent": 0.0,
+        "taxAmount": 0.0,
+        "salesAmountWithTax": 40.0
+      }
+    ],
+    "receiptPayments": [
+      {
+        "moneyTypeCode": "Cash",
+        "paymentAmount": 40.0
+      }
+    ],
+    "receiptTotal": 40.0,
+    "receiptPrintForm": "Receipt48",
+    "receiptNotes": "Debit note issued to correct underbilling on I",
+    "creditDebitNote": {
+      "creditDebitNoteReceiptGlobalNo": 146,
+      "creditDebitNoteDate": "2026-03-06T03:29:21"
+    },
+    "receiptDeviceSignature": {
+      "hash": "...",
+      "signature": "..."
+    }
+  }
+}
