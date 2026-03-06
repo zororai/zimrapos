@@ -210,8 +210,19 @@ class DebitNoteService
         ]);
 
         // Copy buyer data from original receipt (debit note should reference same buyer)
+        Log::info('DebitNoteService - Checking buyer_data', [
+            'original_receipt_id' => $originalReceipt->id,
+            'buyer_data_exists' => isset($originalReceipt->buyer_data),
+            'buyer_data_empty' => empty($originalReceipt->buyer_data),
+            'buyer_data_type' => gettype($originalReceipt->buyer_data),
+            'buyer_data' => $originalReceipt->buyer_data,
+        ]);
+        
         if (!isset($noteData['buyerData']) && $originalReceipt->buyer_data) {
             $noteData['buyerData'] = $originalReceipt->buyer_data;
+            Log::info('DebitNoteService - Copied buyer_data to noteData', [
+                'buyerData' => $noteData['buyerData'],
+            ]);
         }
         
         // Fallback: if customer_id provided, build buyer data from customer
@@ -219,7 +230,16 @@ class DebitNoteService
             $customer = PanierCustomer::where('panier_id', $noteData['customer_id'])->first();
             if ($customer) {
                 $noteData['buyerData'] = $this->receiptFactory->buildBuyerData($customer);
+                Log::info('DebitNoteService - Built buyer_data from customer', [
+                    'customer_id' => $noteData['customer_id'],
+                ]);
             }
+        }
+        
+        if (!isset($noteData['buyerData'])) {
+            Log::warning('DebitNoteService - No buyer_data available', [
+                'original_receipt_id' => $originalReceipt->id,
+            ]);
         }
 
         // Step 8: Build final receipt using ReceiptFactory

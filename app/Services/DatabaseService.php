@@ -1246,7 +1246,9 @@ class DatabaseService
             'receiptTotal' => $receiptTotal,
         ];
 
-        if ($sale->customer_id) {
+        if ($originalReceipt->buyer_data) {
+            $receiptData['buyerData'] = $originalReceipt->buyer_data;
+        } elseif ($sale->customer_id) {
             $customer = PanierCustomer::where('panier_id', $sale->customer_id)->first();
             if ($customer) {
                 $receiptData['buyerData'] = [

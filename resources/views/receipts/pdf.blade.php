@@ -85,6 +85,7 @@
         $companyTin = $config->company_tin ?? 'TIN Number';
         $companyAddress = $config->company_address ?? '';
         $companyPhone = $config->company_phone ?? '';
+        $companyEmail = $config->company_email ?? '';
         
         $vatNumber = null;
         if (isset($receipt->vat_number)) {
@@ -172,11 +173,14 @@
                 @if($companyPhone)
                     Tel: {{ $companyPhone }}<br>
                 @endif
+                @if($companyEmail)
+                    Email: {{ $companyEmail }}<br>
+                @endif
             </td>
             <td width="50%" style="vertical-align:top;">
                 <strong>BUYER</strong><br>
-                @if($receipt->buyer_data)
-                    {{ $receipt->buyer_data['buyerRegisterName'] ?? 'Cash Customer' }}<br>
+                @if($receipt->buyer_data && !empty($receipt->buyer_data) && isset($receipt->buyer_data['buyerRegisterName']) && $receipt->buyer_data['buyerRegisterName'])
+                    {{ $receipt->buyer_data['buyerRegisterName'] }}<br>
                     @if(isset($receipt->buyer_data['buyerTIN']) && $receipt->buyer_data['buyerTIN'])
                         TIN: {{ $receipt->buyer_data['buyerTIN'] }}<br>
                     @endif
@@ -194,8 +198,11 @@
                             {{ $fullAddress }}<br>
                         @endif
                     @endif
-                    @if(isset($receipt->buyer_data['buyerContacts']['phoneNo']))
+                    @if(isset($receipt->buyer_data['buyerContacts']['phoneNo']) && $receipt->buyer_data['buyerContacts']['phoneNo'])
                         Tel: {{ $receipt->buyer_data['buyerContacts']['phoneNo'] }}<br>
+                    @endif
+                    @if(isset($receipt->buyer_data['buyerContacts']['email']) && $receipt->buyer_data['buyerContacts']['email'])
+                        Email: {{ $receipt->buyer_data['buyerContacts']['email'] }}<br>
                     @endif
                 @else
                     Cash Customer

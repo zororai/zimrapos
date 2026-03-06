@@ -142,8 +142,23 @@ class CreditNoteBuilder
         // Copy buyer data from original receipt for PDF display
         // NOTE: This is stored in the database but NOT sent to FDMS API
         // The credit note references the original via creditDebitNote
+        \Log::info('CreditNoteBuilder - Checking buyer_data', [
+            'original_receipt_id' => $originalReceipt->id,
+            'buyer_data_exists' => isset($originalReceipt->buyer_data),
+            'buyer_data_empty' => empty($originalReceipt->buyer_data),
+            'buyer_data_type' => gettype($originalReceipt->buyer_data),
+            'buyer_data' => $originalReceipt->buyer_data,
+        ]);
+        
         if ($originalReceipt->buyer_data) {
             $creditNotePayload['buyerData'] = $originalReceipt->buyer_data;
+            \Log::info('CreditNoteBuilder - Copied buyer_data to payload', [
+                'buyerData' => $creditNotePayload['buyerData'],
+            ]);
+        } else {
+            \Log::warning('CreditNoteBuilder - No buyer_data to copy', [
+                'original_receipt_id' => $originalReceipt->id,
+            ]);
         }
 
         return $creditNotePayload;

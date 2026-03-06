@@ -2266,7 +2266,7 @@ class ZimraDeviceService
             'receipt_lines' => $receiptData['receiptLines'],
             'receipt_taxes' => $receiptData['receiptTaxes'],
             'receipt_payments' => $receiptData['receiptPayments'],
-            'buyer_data' => $receiptData['buyerData'] ?? null,
+            'buyer_data' => $buyerDataForDb ?? $receiptData['buyerData'] ?? null,
             'receipt_hash' => $receiptData['receiptDeviceSignature']['hash'] ?? null,
             'receipt_signature' => $receiptData['receiptDeviceSignature'] ?? null,
             'receipt_qr_code' => $qrCodeString,
@@ -2542,14 +2542,23 @@ class ZimraDeviceService
         */
         // CRITICAL: Credit/Debit notes should NOT include buyerData in FDMS submission
         // They reference the original invoice via creditDebitNote
-        // Including buyerData causes RCPT035 validation errors
+        // CRITICAL: Preserve buyerData for database before removing from FDMS payload
+        // Credit/Debit notes should NOT send buyerData to FDMS (causes RCPT035 errors)
+        // but we MUST save it to database for PDF display
+        $buyerDataForDb = null;
         $receiptType = $receiptData['receiptType'] ?? 'FiscalInvoice';
         if (in_array($receiptType, ['CreditNote', 'DebitNote'])) {
             if (isset($receiptData['buyerData'])) {
-                Log::info('CREDIT_DEBIT_NOTE_BUYER_DATA_REMOVED', [
+                // Save buyer data for database
+                $buyerDataForDb = $receiptData['buyerData'];
+                
+                Log::info('CREDIT_DEBIT_NOTE_BUYER_DATA_PRESERVED', [
                     'receipt_type' => $receiptType,
-                    'action' => 'Removing buyerData from FDMS payload (stored in DB for PDF only)'
+                    'action' => 'Preserving buyerData for DB, removing from FDMS payload',
+                    'buyer_data' => $buyerDataForDb,
                 ]);
+                
+                // Remove from FDMS payload to avoid RCPT035 validation errors
                 unset($receiptData['buyerData']);
             }
         } elseif (isset($receiptData['buyerData'])) {
