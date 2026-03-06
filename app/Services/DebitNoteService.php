@@ -209,8 +209,13 @@ class DebitNoteService
             'receiptTotal' => $receiptTotal,
         ]);
 
-        // Add buyer data if provided
-        if (isset($noteData['customer_id'])) {
+        // Copy buyer data from original receipt (debit note should reference same buyer)
+        if (!isset($noteData['buyerData']) && $originalReceipt->buyer_data) {
+            $noteData['buyerData'] = $originalReceipt->buyer_data;
+        }
+        
+        // Fallback: if customer_id provided, build buyer data from customer
+        if (!isset($noteData['buyerData']) && isset($noteData['customer_id'])) {
             $customer = PanierCustomer::where('panier_id', $noteData['customer_id'])->first();
             if ($customer) {
                 $noteData['buyerData'] = $this->receiptFactory->buildBuyerData($customer);

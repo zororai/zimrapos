@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fiscal Tax Invoice - {{ $receipt->invoice_no }}</title>
+    <title>Debit Note - {{ $receipt->invoice_no }}</title>
     <style>
         @page {
             margin: 15mm;
@@ -42,7 +42,7 @@
             align-items: flex-start;
             margin-bottom: 20px;
             padding-bottom: 10px;
-            border-bottom: 2px solid #000;
+            border-bottom: 3px solid #dc2626;
         }
         
         .company-logo {
@@ -54,69 +54,51 @@
             max-height: 80px;
         }
         
-        .verification-section {
-            text-align: center;
-            margin-bottom: 15px;
-        }
-        
-        .verification-code {
-            font-size: 9pt;
-            color: #0066cc;
-            margin: 5px 0;
-        }
-        
-        .qr-code {
-            display: inline-block;
-            margin: 10px 0;
-        }
-        
-        .receipt-footer {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            text-align: center;
-            padding: 10px 15mm;
-            background: #fff;
-        }
-        
-        .receipt-footer .verification-title {
-            font-size: 8pt;
+        .debit-note-badge {
+            background: #dc2626;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 4px;
             font-weight: bold;
-            margin-bottom: 3px;
-        }
-        
-        .receipt-footer .verification-code {
-            font-size: 9pt;
-            font-weight: bold;
-            letter-spacing: 1px;
-            margin-bottom: 5px;
-        }
-        
-        .receipt-footer .qr-code {
-            display: inline-block;
-            margin: 5px 0;
-        }
-        
-        .receipt-footer .verify-text {
-            font-size: 7pt;
-            color: #666;
-            margin-top: 3px;
-        }
-        
-        .receipt-footer .verification-url {
-            font-size: 6pt;
-            word-break: break-all;
-            color: #0066cc;
-            margin: 3px 0;
+            font-size: 11pt;
+            text-transform: uppercase;
         }
         
         .invoice-title {
             text-align: center;
-            font-size: 14pt;
+            font-size: 16pt;
             font-weight: bold;
             margin: 15px 0;
             text-transform: uppercase;
+            color: #dc2626;
+            border: 2px solid #dc2626;
+            padding: 12px;
+            background: #fef2f2;
+        }
+        
+        .reference-section {
+            background: #fff7ed;
+            border: 2px solid #f59e0b;
+            border-radius: 6px;
+            padding: 12px;
+            margin: 15px 0;
+        }
+        
+        .reference-title {
+            font-weight: bold;
+            font-size: 10pt;
+            color: #92400e;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+        
+        .reference-details {
+            font-size: 9pt;
+            line-height: 1.6;
+        }
+        
+        .reference-details strong {
+            color: #000;
         }
         
         .parties-section {
@@ -144,6 +126,7 @@
             font-size: 10pt;
             margin-bottom: 8px;
             text-transform: uppercase;
+            color: #dc2626;
         }
         
         .party-info {
@@ -153,11 +136,23 @@
         
         .invoice-details {
             margin-bottom: 15px;
+            background: #f9fafb;
+            padding: 12px;
+            border-radius: 4px;
         }
         
         .detail-row {
             padding: 3px 0;
             font-size: 9pt;
+        }
+        
+        .adjustment-note {
+            background: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 12px;
+            margin: 15px 0;
+            font-size: 9pt;
+            font-style: italic;
         }
         
         .items-table {
@@ -168,16 +163,22 @@
         }
         
         .items-table th {
-            background: #f0f0f0;
-            border: 1px solid #000;
-            padding: 6px 4px;
+            background: #dc2626;
+            color: white;
+            border: 1px solid #991b1b;
+            padding: 8px 6px;
             text-align: left;
             font-weight: bold;
         }
         
         .items-table td {
-            border: 1px solid #000;
-            padding: 6px 4px;
+            border: 1px solid #d1d5db;
+            padding: 8px 6px;
+            background: white;
+        }
+        
+        .items-table tbody tr:nth-child(even) td {
+            background: #fef2f2;
         }
         
         .items-table .text-right {
@@ -188,8 +189,9 @@
             text-align: center;
         }
         
-        .totals-section {
-            margin-top: 15px;
+        .items-table .adjustment-qty {
+            color: #dc2626;
+            font-weight: bold;
         }
         
         .tax-summary-table {
@@ -198,22 +200,23 @@
             border-collapse: collapse;
             margin-top: 20px;
             font-size: 9.5pt;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px rgba(220, 38, 38, 0.1);
         }
         
         .tax-summary-table th {
-            background: linear-gradient(to bottom, #e8e8e8, #d0d0d0);
-            border: 1px solid #999;
+            background: linear-gradient(to bottom, #fee2e2, #fecaca);
+            border: 1px solid #dc2626;
             padding: 10px 12px;
             text-align: center;
             font-weight: bold;
             font-size: 10pt;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            color: #991b1b;
         }
         
         .tax-summary-table td {
-            border: 1px solid #ccc;
+            border: 1px solid #fecaca;
             padding: 10px 12px;
         }
         
@@ -223,50 +226,65 @@
         }
         
         .tax-summary-table .subtotal-row td {
-            background: #f5f5f5;
+            background: #fef2f2;
             font-weight: 600;
-            border-bottom: 2px solid #999;
+            border-bottom: 2px solid #dc2626;
         }
         
         .tax-summary-table .tax-row td {
-            background: #fafafa;
-        }
-        
-        .tax-summary-table .tax-row:hover td {
-            background: #f0f0f0;
+            background: #fffbeb;
         }
         
         .tax-summary-table .grand-total-row td {
-            background: linear-gradient(to bottom, #f8f8f8, #e8e8e8);
+            background: linear-gradient(to bottom, #fee2e2, #fecaca);
             font-weight: bold;
             font-size: 11pt;
-            border-top: 3px double #000;
+            border-top: 3px double #dc2626;
             padding: 12px;
+            color: #991b1b;
+        }
+        
+        .receipt-footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            text-align: center;
+            padding: 10px 15mm;
+            background: #fff;
+        }
+        
+        .receipt-footer .verification-title {
+            font-size: 8pt;
+            font-weight: bold;
+            margin-bottom: 3px;
+            color: #dc2626;
+        }
+        
+        .receipt-footer .verification-code {
+            font-size: 9pt;
+            font-weight: bold;
+            letter-spacing: 1px;
+            margin-bottom: 5px;
+        }
+        
+        .receipt-footer .qr-code {
+            display: inline-block;
+            margin: 5px 0;
+        }
+        
+        .receipt-footer .verify-text {
+            font-size: 7pt;
+            color: #666;
+            margin-top: 3px;
         }
         
         .footer-note {
             margin-top: 20px;
             font-size: 8pt;
-            font-style: italic;
             text-align: center;
-        }
-        
-        .print-btn {
-            display: block;
-            width: 200px;
-            margin: 20px auto;
-            padding: 12px;
-            background: #0066cc;
-            color: white;
-            border: none;
-            font-size: 11pt;
-            cursor: pointer;
-            text-align: center;
-            text-decoration: none;
-        }
-        
-        .print-btn:hover {
-            background: #0052a3;
+            color: #dc2626;
+            font-weight: bold;
         }
     </style>
 </head>
@@ -276,17 +294,37 @@
             $config = \App\Models\ZimraConfig::where('device_id', $receipt->device_id)->first();
             $companyName = $config->company_name ?? 'Company Name';
             $companyTin = $config->company_tin ?? 'TIN Number';
+            
+            // Get original receipt reference (FDMS spec items [24]-[28])
+            $originalReceipt = null;
+            $originalReceiptNo = null;
+            $originalReceiptDate = null;
+            $originalReceiptGlobalNo = null;
+            $originalDeviceSerialNo = null;
+            if (isset($receipt->original_receipt_id)) {
+                $originalReceipt = \App\Models\Receipt::find($receipt->original_receipt_id);
+                if ($originalReceipt) {
+                    $originalReceiptNo = $originalReceipt->invoice_no;
+                    $originalReceiptDate = $originalReceipt->receipt_date;
+                    $originalReceiptGlobalNo = $originalReceipt->receipt_global_no;
+                    // Get device serial number from config
+                    $originalConfig = \App\Models\ZimraConfig::where('device_id', $originalReceipt->device_id)->first();
+                    $originalDeviceSerialNo = $originalConfig->serial_number ?? $originalReceipt->device_id;
+                }
+            }
         @endphp
         
         <div class="header">
             <div class="company-logo">
-                <!-- Logo placeholder - add your company logo here -->
-                <div style="width: 60px; height: 60px; border: 1px solid #000; display: flex; align-items: center; justify-content: center; font-size: 8pt;">LOGO</div>
+                <div style="width: 60px; height: 60px; border: 2px solid #dc2626; display: flex; align-items: center; justify-content: center; font-size: 8pt; color: #dc2626; font-weight: bold;">LOGO</div>
+            </div>
+            <div class="debit-note-badge">
+                DEBIT NOTE
             </div>
         </div>
         
         <div class="invoice-title">
-            FISCAL TAX INVOICE
+            FISCAL TAX DEBIT NOTE
         </div>
         
         <div class="parties-section">
@@ -319,33 +357,11 @@
                                     @if(isset($receipt->buyer_data['buyerRegisterName']))
                                         <strong>{{ $receipt->buyer_data['buyerRegisterName'] }}</strong><br>
                                     @endif
-                                    @if(isset($receipt->buyer_data['buyerTradeName']) && $receipt->buyer_data['buyerTradeName'] != $receipt->buyer_data['buyerRegisterName'])
-                                        Trading as: {{ $receipt->buyer_data['buyerTradeName'] }}<br>
-                                    @endif
                                     @if(isset($receipt->buyer_data['buyerTIN']))
                                         TIN: {{ $receipt->buyer_data['buyerTIN'] }}<br>
                                     @endif
-                                    @if(isset($receipt->buyer_data['vatNumber']))
-                                        VAT: {{ $receipt->buyer_data['vatNumber'] }}<br>
-                                    @endif
-                                    @if(isset($receipt->buyer_data['buyerAddress']))
-                                        @php
-                                            $address = [];
-                                            if(isset($receipt->buyer_data['buyerAddress']['houseNo'])) $address[] = $receipt->buyer_data['buyerAddress']['houseNo'];
-                                            if(isset($receipt->buyer_data['buyerAddress']['street'])) $address[] = $receipt->buyer_data['buyerAddress']['street'];
-                                            if(isset($receipt->buyer_data['buyerAddress']['district'])) $address[] = $receipt->buyer_data['buyerAddress']['district'];
-                                            if(isset($receipt->buyer_data['buyerAddress']['city'])) $address[] = $receipt->buyer_data['buyerAddress']['city'];
-                                            $fullAddress = implode(', ', array_filter($address));
-                                        @endphp
-                                        @if($fullAddress)
-                                            {{ $fullAddress }}<br>
-                                        @endif
-                                    @endif
                                     @if(isset($receipt->buyer_data['buyerContacts']['phoneNo']))
                                         Tel: {{ $receipt->buyer_data['buyerContacts']['phoneNo'] }}<br>
-                                    @endif
-                                    @if(isset($receipt->buyer_data['buyerContacts']['email']))
-                                        Email: {{ $receipt->buyer_data['buyerContacts']['email'] }}
                                     @endif
                                 @else
                                     <em>Cash Customer</em>
@@ -357,7 +373,7 @@
             </table>
         </div>
         
-        <!-- FDMS Spec Items [17]-[23]: Current Receipt Information -->
+        <!-- FDMS Spec Items [17]-[23]: Current Debit Note Information -->
         <div class="invoice-details" style="display: table; width: 100%; margin: 15px 0;">
             <div style="display: table-row;">
                 <div style="display: table-cell; width: 50%; padding: 5px; font-size: 9pt;">[17] Invoice No (Receipt Counter): <strong>{{ $receipt->receipt_counter ?? 'N/A' }}</strong></div>
@@ -374,75 +390,69 @@
             <div style="display: table-row;">
                 <div style="display: table-cell; width: 100%; padding: 5px; font-size: 9pt;" colspan="2">[23] Receipt Date and Time: <strong>{{ $receipt->receipt_date->format('d/m/Y H:i:s') }}</strong></div>
             </div>
-            @if(isset($receipt->date_issued))
-            <div style="display: table-row;">
-                <div style="display: table-cell; width: 100%; padding: 5px; font-size: 9pt;" colspan="2">Date Issued: <strong>{{ \Carbon\Carbon::parse($receipt->date_issued)->format('d/m/Y') }}</strong></div>
-            </div>
-            @endif
-            @if(isset($receipt->payment_due))
-            <div style="display: table-row;">
-                <div style="display: table-cell; width: 100%; padding: 5px; font-size: 9pt;" colspan="2">Payment Due: <strong>{{ \Carbon\Carbon::parse($receipt->payment_due)->format('d/m/Y') }}</strong></div>
-            </div>
-            @endif
         </div>
+        
+        <!-- FDMS Spec Items [24]-[28]: Debited Invoice Information Block -->
+        @if($originalReceipt)
+        <div class="reference-section">
+            <div class="reference-title">[24] Debited Invoice</div>
+            <div class="reference-details">
+                <div class="detail-row">[25] Device Serial No: <strong>{{ $originalDeviceSerialNo }}</strong></div>
+                <div class="detail-row">[26] Invoice No (Receipt Global No): <strong>{{ $originalReceiptGlobalNo }}</strong></div>
+                <div class="detail-row">[27] Receipt Date: <strong>{{ $originalReceiptDate->format('d/m/Y H:i:s') }}</strong></div>
+                <div class="detail-row">[28] Customer Reference No: <strong>{{ $originalReceiptNo }}</strong></div>
+                <div class="detail-row" style="margin-top: 10px;"><strong>Reason:</strong> {{ $receipt->receipt_notes ?? 'Quantity adjustment' }}</div>
+            </div>
+        </div>
+        @endif
+        
+        @if($receipt->receipt_notes)
+        <div class="adjustment-note">
+            ⚠️ <strong>Reason for Debit Note:</strong> {{ $receipt->receipt_notes }}
+        </div>
+        @endif
         
         <table class="items-table">
             <thead>
                 <tr>
-                    <th style="width: 5%;">Code</th>
-                    <th style="width: 28%;">Description</th>
-                    <th class="text-center" style="width: 6%;">Qty</th>
-                    <th class="text-right" style="width: 9%;">Price<br>({{ $receipt->receipt_currency }})</th>
-                    <th class="text-right" style="width: 9%;">Discount<br>({{ $receipt->receipt_currency }})</th>
+                    <th style="width: 5%;">No.</th>
+                    <th style="width: 35%;">Description</th>
+                    <th class="text-center" style="width: 12%;">Adjustment Qty</th>
+                    <th class="text-right" style="width: 12%;">Unit Price<br>({{ $receipt->receipt_currency }})</th>
                     <th class="text-right" style="width: 12%;">Amount<br>(excl. Tax)<br>({{ $receipt->receipt_currency }})</th>
-                    <th class="text-right" style="width: 9%;">Tax<br>({{ $receipt->receipt_currency }})</th>
-                    <th class="text-right" style="width: 12%;">Amount<br>(incl. Tax)<br>({{ $receipt->receipt_currency }})</th>
+                    <th class="text-right" style="width: 12%;">Tax<br>({{ $receipt->receipt_currency }})</th>
+                    <th class="text-right" style="width: 12%;">Total<br>({{ $receipt->receipt_currency }})</th>
                 </tr>
             </thead>
             <tbody>
                 @foreach($receipt->receipt_lines as $index => $line)
                 @php
-                    $lineType = $line['receiptLineType'] ?? 'Sale';
-                    $isDiscount = $lineType === 'Discount';
                     $linePrice = abs($line['receiptLinePrice'] ?? 0);
                     $lineTotal = abs($line['receiptLineTotal'] ?? 0);
                     $lineQty = $line['receiptLineQuantity'] ?? 1;
-                    $taxPercent = $line['taxPercent'] ?? $receipt->tax_percent ?? 0;
+                    $taxPercent = $line['taxPercent'] ?? 0;
                     
-                    // Calculate discount amount (0 for sale lines, show amount for discount lines)
-                    $discountAmount = $isDiscount ? $lineTotal : 0;
-                    
-                    // Calculate amounts
+                    // Calculate tax amount
                     if ($taxPercent > 0) {
-                        // Tax inclusive calculation
                         $amountInclTax = $lineTotal;
                         $taxAmount = $lineTotal - ($lineTotal / (1 + ($taxPercent / 100)));
                         $amountExclTax = $lineTotal - $taxAmount;
                     } else {
-                        // No tax
                         $amountInclTax = $lineTotal;
                         $taxAmount = 0;
                         $amountExclTax = $lineTotal;
                     }
                 @endphp
-                <tr @if($isDiscount) style="background-color: #fff8dc;" @endif>
-                    <td>{{ $line['receiptLineHSCode'] ?? ($index + 1) }}</td>
+                <tr>
+                    <td class="text-center">{{ $index + 1 }}</td>
                     <td>
-                        @if($isDiscount)
-                            <em style="color: #d97706;">{{ $line['receiptLineName'] ?? 'Discount' }}</em>
-                        @else
-                            {{ $line['receiptLineName'] ?? 'Item' }}
+                        <strong>{{ $line['receiptLineName'] ?? 'Item' }}</strong>
+                        @if(isset($line['receiptLineHSCode']) && $line['receiptLineHSCode'] != '0000')
+                            <br><small style="color: #666;">HS Code: {{ $line['receiptLineHSCode'] }}</small>
                         @endif
                     </td>
-                    <td class="text-center">{{ $lineQty }}</td>
+                    <td class="text-center adjustment-qty">+{{ number_format($lineQty, 2) }}</td>
                     <td class="text-right">{{ number_format($linePrice, 2) }}</td>
-                    <td class="text-right" style="color: {{ $discountAmount > 0 ? '#d97706' : '#666' }};">
-                        @if($discountAmount > 0)
-                            ({{ number_format($discountAmount, 2) }})
-                        @else
-                            -
-                        @endif
-                    </td>
                     <td class="text-right">{{ number_format($amountExclTax, 2) }}</td>
                     <td class="text-right">{{ number_format($taxAmount, 2) }}</td>
                     <td class="text-right"><strong>{{ number_format($amountInclTax, 2) }}</strong></td>
@@ -452,46 +462,23 @@
         </table>
         
         @php
-            // Calculate subtotal (excluding tax)
+            // Calculate totals
             $subtotal = 0;
             $taxBreakdown = [];
             
-            // Group taxes by type
             if (isset($receipt->receipt_taxes) && is_array($receipt->receipt_taxes)) {
                 foreach ($receipt->receipt_taxes as $tax) {
                     $taxPercent = $tax['taxPercent'] ?? 0;
                     $taxAmount = abs($tax['taxAmount'] ?? 0);
                     $salesAmount = abs($tax['salesAmountWithTax'] ?? 0);
-                    $taxCode = $tax['taxCode'] ?? null;
                     
-                    // Determine tax label
-                    if ($taxPercent == 0) {
-                        $label = 'Zero rated (0%)';
-                    } elseif ($taxPercent == 15 || $taxPercent == 15.5) {
-                        $label = 'Standard rated (' . $taxPercent . '%)';
-                    } elseif ($taxPercent == 5) {
-                        $label = 'Non-VAT Withholding Tax (5%)';
-                    } else {
-                        $label = 'Exempt';
-                    }
+                    $label = $taxPercent == 0 ? 'Zero rated (0%)' : 'Tax (' . $taxPercent . '%)';
                     
                     if (!isset($taxBreakdown[$label])) {
                         $taxBreakdown[$label] = 0;
                     }
                     $taxBreakdown[$label] += $taxAmount;
-                    
-                    // Add to subtotal (sales amount minus tax)
                     $subtotal += ($salesAmount - $taxAmount);
-                }
-            }
-            
-            // If no taxes, calculate from total
-            if (empty($taxBreakdown)) {
-                $subtotal = abs($receipt->receipt_total) - abs($receipt->tax_amount);
-                if ($receipt->tax_percent > 0) {
-                    $taxBreakdown['Standard rated (' . $receipt->tax_percent . '%)'] = abs($receipt->tax_amount);
-                } else {
-                    $taxBreakdown['Zero rated (0%)'] = 0;
                 }
             }
             
@@ -501,7 +488,7 @@
         <div class="totals-section">
             <table class="tax-summary-table">
                 <tr class="subtotal-row">
-                    <td style="width: 60%;"><strong>Sub Total</strong><br><span style="font-size: 8pt; color: #666;">(excl. Tax)</span></td>
+                    <td style="width: 60%;"><strong>Adjustment Sub Total</strong><br><span style="font-size: 8pt; color: #666;">(excl. Tax)</span></td>
                     <td style="width: 15%; text-align: center;"></td>
                     <td style="width: 25%;" class="text-right"><strong>{{ $receipt->receipt_currency }} {{ number_format($subtotal, 2) }}</strong></td>
                 </tr>
@@ -516,7 +503,7 @@
                 </tr>
                 @endforeach
                 <tr class="grand-total-row">
-                    <td><strong>Grand Total</strong></td>
+                    <td><strong>Total Adjustment Amount</strong></td>
                     <td class="text-right"><strong>{{ $receipt->receipt_currency }}</strong></td>
                     <td class="text-right"><strong>{{ number_format($grandTotal, 2) }}</strong></td>
                 </tr>
@@ -524,7 +511,7 @@
         </div>
         
         <div class="footer-note">
-            Invoice is issued after purchasing goods according to agreement No.555
+            This is an official ZIMRA fiscalized debit note. The amount shown represents the adjustment to the original invoice.
         </div>
     </div>
     
@@ -540,27 +527,7 @@
                 <img src="{{ $qrCodeBase64 }}" width="100" height="100" alt="QR Code">
             </div>
         @endif
-        @if($receipt->receipt_qr_code)
-            <div class="verification-url">
-                <a href="{{ $receipt->receipt_qr_code }}" style="color: #0066cc;">{{ $receipt->receipt_qr_code }}</a>
-            </div>
-        @endif
-        <div class="verify-text">Scan to verify receipt</div>
+        <div class="verify-text">Scan to verify debit note</div>
     </div>
-    
-    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            var qrString = '{{ $receipt->receipt_qr_code ?? "" }}';
-            var qrElement = document.getElementById('qrcode');
-            
-            if (qrString && qrElement && typeof qrcode !== 'undefined') {
-                var qr = qrcode(0, 'M');
-                qr.addData(qrString);
-                qr.make();
-                qrElement.innerHTML = qr.createImgTag(3);
-            }
-        });
-    </script>
 </body>
 </html>

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fiscal Tax Invoice - {{ $receipt->invoice_no }}</title>
+    <title>Credit Note - {{ $receipt->invoice_no }}</title>
     <style>
         @page {
             margin: 15mm;
@@ -42,7 +42,19 @@
             align-items: flex-start;
             margin-bottom: 20px;
             padding-bottom: 10px;
-            border-bottom: 2px solid #000;
+            border-bottom: 3px solid #0052a3;
+        }
+        
+        .credit-note-badge {
+            background: linear-gradient(135deg, #0052a3, #0066cc);
+            color: white;
+            padding: 8px 20px;
+            font-weight: bold;
+            font-size: 11pt;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            box-shadow: 0 2px 4px rgba(0,82,163,0.3);
         }
         
         .company-logo {
@@ -117,6 +129,7 @@
             font-weight: bold;
             margin: 15px 0;
             text-transform: uppercase;
+            color: #0052a3;
         }
         
         .parties-section {
@@ -276,17 +289,36 @@
             $config = \App\Models\ZimraConfig::where('device_id', $receipt->device_id)->first();
             $companyName = $config->company_name ?? 'Company Name';
             $companyTin = $config->company_tin ?? 'TIN Number';
+            
+            // Get original receipt reference for credit note (FDMS spec items [24]-[28])
+            $originalReceipt = null;
+            $originalReceiptNo = null;
+            $originalReceiptDate = null;
+            $originalReceiptGlobalNo = null;
+            $originalDeviceSerialNo = null;
+            if (isset($receipt->original_receipt_id)) {
+                $originalReceipt = \App\Models\Receipt::find($receipt->original_receipt_id);
+                if ($originalReceipt) {
+                    $originalReceiptNo = $originalReceipt->invoice_no;
+                    $originalReceiptDate = $originalReceipt->receipt_date;
+                    $originalReceiptGlobalNo = $originalReceipt->receipt_global_no;
+                    $originalConfig = \App\Models\ZimraConfig::where('device_id', $originalReceipt->device_id)->first();
+                    $originalDeviceSerialNo = $originalConfig->serial_number ?? $originalReceipt->device_id;
+                }
+            }
         @endphp
         
         <div class="header">
             <div class="company-logo">
-                <!-- Logo placeholder - add your company logo here -->
-                <div style="width: 60px; height: 60px; border: 1px solid #000; display: flex; align-items: center; justify-content: center; font-size: 8pt;">LOGO</div>
+                <div style="width: 60px; height: 60px; border: 2px solid #0052a3; display: flex; align-items: center; justify-content: center; font-size: 8pt; color: #0052a3; font-weight: bold;">LOGO</div>
+            </div>
+            <div class="credit-note-badge">
+                CREDIT NOTE
             </div>
         </div>
         
         <div class="invoice-title">
-            FISCAL TAX INVOICE
+            FISCAL TAX CREDIT NOTE
         </div>
         
         <div class="parties-section">
@@ -385,6 +417,30 @@
             </div>
             @endif
         </div>
+        
+        <!-- FDMS Spec Items [24]-[28]: Credited Invoice Information Block -->
+        @if($originalReceipt)
+        <div style="margin: 15px 0; padding: 10px; border: 2px solid #0052a3; background: #eff6ff;">
+            <div style="font-weight: bold; font-size: 10pt; margin-bottom: 8px; color: #0052a3;">
+                [24] Credited Invoice
+            </div>
+            <div style="font-size: 9pt; line-height: 1.6;">
+                <div>[25] Device Serial No: <strong>{{ $originalDeviceSerialNo }}</strong></div>
+                <div>[26] Invoice No (Receipt Global No): <strong>{{ $originalReceiptGlobalNo }}</strong></div>
+                <div>[27] Receipt Date: <strong>{{ $originalReceiptDate->format('d/m/Y H:i:s') }}</strong></div>
+                <div>[28] Customer Reference No: <strong>{{ $originalReceiptNo }}</strong></div>
+                @if($receipt->receipt_notes)
+                <div style="margin-top: 8px;"><strong>Reason:</strong> {{ $receipt->receipt_notes }}</div>
+                @endif
+            </div>
+        </div>
+        @endif
+        
+        @if($receipt->receipt_notes)
+        <div style="background: #eff6ff; border-left: 4px solid #0052a3; padding: 12px; margin: 15px 0; font-size: 9pt;">
+            ⚠️ <strong>Reason for Credit Note:</strong> {{ $receipt->receipt_notes }}
+        </div>
+        @endif
         
         <table class="items-table">
             <thead>

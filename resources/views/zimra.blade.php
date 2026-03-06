@@ -190,6 +190,20 @@
                             </div>
                         </div>
                         <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Company Address</label>
+                            <textarea x-model="configForm.company_address" rows="2" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="123 Main Street, Harare, Zimbabwe"></textarea>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Company Email</label>
+                                <input type="email" x-model="configForm.company_email" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="info@company.co.zw">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Company Phone</label>
+                                <input type="tel" x-model="configForm.company_phone" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="+263 4 123 4567">
+                            </div>
+                        </div>
+                        <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Base URL</label>
                             <input type="url" x-model="configForm.base_url" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="https://fdmsapitest.zimra.co.zw" required>
                         </div>
@@ -240,10 +254,18 @@
                                                     <span x-show="!c.is_active" class="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs font-medium rounded">Inactive</span>
                                                 </td>
                                                 <td class="px-4 py-2 text-center">
-                                                    <button x-show="!c.is_active" @click="selectedConfigId = c.id; switchCompany()" class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">
-                                                        Select
-                                                    </button>
-                                                    <span x-show="c.is_active" class="text-xs text-green-600 font-medium">Current</span>
+                                                    <div class="flex items-center justify-center space-x-2">
+                                                        <button @click="editConfig(c)" class="px-2 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-700 flex items-center space-x-1">
+                                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                                                            </svg>
+                                                            <span>Edit</span>
+                                                        </button>
+                                                        <button x-show="!c.is_active" @click="selectedConfigId = c.id; switchCompany()" class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">
+                                                            Select
+                                                        </button>
+                                                        <span x-show="c.is_active" class="text-xs text-green-600 font-medium">Current</span>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         </template>
@@ -252,6 +274,78 @@
                             </div>
                         </div>
                     </template>
+
+                    <!-- Edit Company Modal -->
+                    <div x-show="showEditModal" x-cloak class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="showEditModal = false">
+                        <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+                            <div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+                                <h3 class="text-lg font-semibold text-gray-900">Edit Company Configuration</h3>
+                                <button @click="showEditModal = false" class="text-gray-400 hover:text-gray-600">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            <form @submit.prevent="updateConfig()" class="p-6 space-y-4" x-show="editingConfig">
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Company Name *</label>
+                                        <input type="text" x-model="editingConfig.company_name" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500" required>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Company TIN</label>
+                                        <input type="text" x-model="editingConfig.company_tin" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Company Address</label>
+                                    <textarea x-model="editingConfig.company_address" rows="2" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500" placeholder="123 Main Street, Harare, Zimbabwe"></textarea>
+                                </div>
+                                
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Company Email</label>
+                                        <input type="email" x-model="editingConfig.company_email" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500" placeholder="info@company.co.zw">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Company Phone</label>
+                                        <input type="tel" x-model="editingConfig.company_phone" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500" placeholder="+263 4 123 4567">
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Base URL</label>
+                                    <input type="url" x-model="editingConfig.base_url" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500" required>
+                                </div>
+                                
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Device Model</label>
+                                        <input type="text" x-model="editingConfig.device_model" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500" required>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Device Version</label>
+                                        <input type="text" x-model="editingConfig.device_version" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500" required>
+                                    </div>
+                                </div>
+                                
+                                <div class="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
+                                    <button type="button" @click="showEditModal = false" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+                                        Cancel
+                                    </button>
+                                    <button type="submit" :disabled="loading" class="px-6 py-2 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 disabled:opacity-50 flex items-center space-x-2">
+                                        <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                        </svg>
+                                        <span>Update Company</span>
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
 
                     <!-- Current Active Configuration Details -->
                     <template x-if="config">
@@ -269,6 +363,9 @@
                                 <div><span class="text-gray-500">Company:</span> <span class="font-medium text-green-700" x-text="config.company_name"></span></div>
                                 <div><span class="text-gray-500">TIN:</span> <span class="font-medium" x-text="config.company_tin || 'N/A'"></span></div>
                                 <div><span class="text-gray-500">Device ID:</span> <span class="font-medium" x-text="config.device_id || 'Not registered'"></span></div>
+                                <div class="col-span-3" x-show="config.company_address"><span class="text-gray-500">Address:</span> <span class="font-medium" x-text="config.company_address"></span></div>
+                                <div x-show="config.company_email"><span class="text-gray-500">Email:</span> <span class="font-medium" x-text="config.company_email"></span></div>
+                                <div x-show="config.company_phone"><span class="text-gray-500">Phone:</span> <span class="font-medium" x-text="config.company_phone"></span></div>
                                 <div><span class="text-gray-500">Base URL:</span> <span class="font-medium" x-text="config.base_url"></span></div>
                                 <div><span class="text-gray-500">Model:</span> <span class="font-medium" x-text="config.device_model"></span></div>
                                 <div><span class="text-gray-500">Version:</span> <span class="font-medium" x-text="config.device_version"></span></div>
@@ -666,8 +763,9 @@
                                                 <input type="text" x-model="receiptForm.buyerData.vatNumber" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="12345678" maxlength="8">
                                             </div>
                                             <div>
-                                                <label class="block text-sm font-medium text-gray-700 mb-1">TIN</label>
-                                                <input type="text" x-model="receiptForm.buyerData.buyerTIN" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="1234567890" maxlength="10">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">TIN <span class="text-red-500">*</span></label>
+                                                <input type="text" x-model="receiptForm.buyerData.buyerTIN" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="1234567890" minlength="10" maxlength="10" pattern="[0-9]{10}" title="TIN must be exactly 10 digits">
+                                                <p class="mt-1 text-xs text-gray-500">Must be exactly 10 digits</p>
                                             </div>
                                         </div>
                                         
@@ -1398,10 +1496,16 @@
                 configForm: {
                     company_name: '',
                     company_tin: '',
+                    company_address: '',
+                    company_email: '',
+                    company_phone: '',
                     base_url: 'https://fdmsapitest.zimra.co.zw',
                     device_model: 'Server',
                     device_version: 'v1'
                 },
+                
+                editingConfig: null,
+                showEditModal: false,
                 
                 registerForm: {
                     device_id: '',
@@ -1737,8 +1841,54 @@
                             // Clear form for next entry
                             this.configForm.company_name = '';
                             this.configForm.company_tin = '';
+                            this.configForm.company_address = '';
+                            this.configForm.company_email = '';
+                            this.configForm.company_phone = '';
                         } else {
                             this.showMessage(data.message || 'Failed to save configuration', 'error');
+                        }
+                    } catch (e) {
+                        this.showMessage('An error occurred', 'error');
+                    }
+                    this.loading = false;
+                },
+                
+                editConfig(company) {
+                    this.editingConfig = { ...company };
+                    this.showEditModal = true;
+                },
+                
+                async updateConfig() {
+                    this.loading = true;
+                    try {
+                        const res = await fetch(`/zimra/config/${this.editingConfig.id}`, {
+                            method: 'PUT',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                            },
+                            body: JSON.stringify({
+                                company_name: this.editingConfig.company_name,
+                                company_tin: this.editingConfig.company_tin,
+                                company_address: this.editingConfig.company_address,
+                                company_email: this.editingConfig.company_email,
+                                company_phone: this.editingConfig.company_phone,
+                                base_url: this.editingConfig.base_url,
+                                device_model: this.editingConfig.device_model,
+                                device_version: this.editingConfig.device_version
+                            })
+                        });
+                        
+                        const data = await res.json();
+                        
+                        if (res.ok) {
+                            this.showMessage('Company updated successfully!', 'success');
+                            this.showEditModal = false;
+                            this.editingConfig = null;
+                            await this.loadAllConfigs();
+                            await this.loadConfig();
+                        } else {
+                            this.showMessage(data.message || 'Failed to update configuration', 'error');
                         }
                     } catch (e) {
                         this.showMessage('An error occurred', 'error');

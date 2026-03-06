@@ -9,6 +9,9 @@ class ZimraConfig extends Model
     protected $fillable = [
         'company_name',
         'company_tin',
+        'company_address',
+        'company_email',
+        'company_phone',
         'base_url',
         'device_model',
         'device_version',

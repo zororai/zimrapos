@@ -142,6 +142,11 @@ class ZimraController extends Controller
         $config = ZimraConfig::findOrFail($id);
 
         $validated = $request->validate([
+            'company_name' => 'sometimes|string|max:255',
+            'company_tin' => 'sometimes|string|max:50',
+            'company_address' => 'sometimes|string|nullable',
+            'company_email' => 'sometimes|email|nullable',
+            'company_phone' => 'sometimes|string|max:50|nullable',
             'base_url' => 'sometimes|url',
             'device_model' => 'sometimes|string',
             'device_version' => 'sometimes|string',
@@ -751,8 +756,20 @@ class ZimraController extends Controller
             $verificationCode = $this->generateVerificationCode($receipt->receipt_qr_code);
         }
         
+        // Select appropriate template based on receipt type
+        $template = 'receipts.pdf'; // Default template for invoices
+        $filename = 'receipt-' . $receipt->invoice_no . '.pdf';
+        
+        if ($receipt->receipt_type === 'DebitNote') {
+            $template = 'receipts.debit_note_pdf';
+            $filename = 'debit-note-' . $receipt->invoice_no . '.pdf';
+        } elseif ($receipt->receipt_type === 'CreditNote') {
+            $template = 'receipts.credit_note_pdf';
+            $filename = 'credit-note-' . $receipt->invoice_no . '.pdf';
+        }
+        
         // Generate PDF using dompdf
-        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('receipts.pdf', [
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView($template, [
             'receipt' => $receipt,
             'qrCodeBase64' => $qrCodeBase64,
             'verificationCode' => $verificationCode,
@@ -761,7 +778,7 @@ class ZimraController extends Controller
         // Set paper size and orientation
         $pdf->setPaper('a4', 'portrait');
         
-        return $pdf->download('receipt-' . $receipt->invoice_no . '.pdf');
+        return $pdf->download($filename);
     }
 
     /*
