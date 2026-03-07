@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Credit Note - {{ $receipt->invoice_no }}</title>
+    <title>Debit Note - {{ $receipt->invoice_no }}</title>
     <style>
         @page {
             margin-top: 120px;
@@ -28,7 +28,7 @@
 
         .header-table {
             width: 100%;
-            border-bottom: 2px solid #0052a3;
+            border-bottom: 2px solid #d32f2f;
         }
 
         .items {
@@ -40,8 +40,8 @@
         .items th {
             border: 1px solid #000;
             padding: 6px;
-            background: #e6f2ff;
-            color: #0052a3;
+            background: #ffebee;
+            color: #d32f2f;
         }
 
         .items td {
@@ -78,8 +78,8 @@
             font-size: 9pt;
         }
 
-        .credit-note-badge {
-            background: #0052a3;
+        .debit-note-badge {
+            background: #d32f2f;
             color: white;
             padding: 3px 10px;
             display: inline-block;
@@ -88,8 +88,8 @@
         }
 
         .original-invoice-info {
-            background: #f0f8ff;
-            border: 1px solid #0052a3;
+            background: #fff3e0;
+            border: 1px solid #d32f2f;
             padding: 10px;
             margin-bottom: 10px;
             font-size: 9pt;
@@ -163,9 +163,9 @@
                     @endif
                 </td>
                 <td width="50%" class="text-center" style="vertical-align:middle;">
-                    <span class="credit-note-badge">CREDIT NOTE</span><br>
-                    <h2 style="margin:5px 0; color:#0052a3;">FISCAL TAX CREDIT NOTE</h2>
-                    Credit Note: {{ $receipt->invoice_no }}
+                    <span class="debit-note-badge">DEBIT NOTE</span><br>
+                    <h2 style="margin:5px 0; color:#d32f2f;">FISCAL TAX DEBIT NOTE</h2>
+                    Debit Note: {{ $receipt->invoice_no }}
                 </td>
                 <td width="25%" class="text-right" style="vertical-align:top;">
                     @if(isset($qrCodeBase64) && $qrCodeBase64)
@@ -182,10 +182,10 @@
         </table>
     </div>
 
-    <!-- Credited Invoice Information -->
+    <!-- Debited Invoice Information -->
     @if($originalReceipt)
     <div class="original-invoice-info">
-        <strong>Credited Invoice</strong>
+        <strong>Debited Invoice</strong>
     </div>
     <table width="100%" style="margin-bottom:10px; font-size:9pt;">
         <tr>
@@ -204,8 +204,8 @@
     </table>
     @endif
 
-    <!-- Current Credit Note Metadata -->
-    <table width="100%" style="margin-bottom:10px; font-size:9pt; background:#f0f8ff;">
+    <!-- Current Debit Note Metadata -->
+    <table width="100%" style="margin-bottom:10px; font-size:9pt; background:#fff3e0;">
         <tr>
             <td>Invoice No (Receipt Counter): {{ $receipt->receipt_counter }}</td>
             <td>Invoice No (Receipt Global No): {{ $receipt->receipt_global_no }}</td>
@@ -331,8 +331,8 @@
             <td class="text-right">{{ $receipt->receipt_currency }} {{ number_format($amount, 2) }}</td>
         </tr>
         @endforeach
-        <tr style="background:#e6f2ff;">
-            <td><strong>Credit Note Total</strong></td>
+        <tr style="background:#ffebee;">
+            <td><strong>Debit Note Total</strong></td>
             <td class="text-right"><strong>{{ $receipt->receipt_currency }} {{ number_format($grandTotal, 2) }}</strong></td>
         </tr>
     </table>
