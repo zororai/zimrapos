@@ -7,6 +7,27 @@ const api = axios.create({
   },
 });
 
+// Add response interceptor to handle non-JSON responses
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // If the error response is HTML instead of JSON, provide a better error message
+    if (error.response) {
+      const contentType = error.response.headers['content-type'];
+      if (contentType && contentType.includes('text/html')) {
+        // Server returned HTML error page instead of JSON
+        error.message = `Server error (${error.response.status}): The server returned an HTML error page. Check server logs for details.`;
+        error.response.data = {
+          error: error.message,
+          status: error.response.status,
+          html_response: true,
+        };
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 // Products
 export const productApi = {
   search: (query = '*', limit = 50, skip = 0) =>

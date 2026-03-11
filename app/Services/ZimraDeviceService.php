@@ -542,14 +542,35 @@ class ZimraDeviceService
         ])->get("{$baseUrl}/Device/v1/{$deviceId}/GetStatus");
 
         if (!$response->successful()) {
+            // Safely parse response - might be HTML error page instead of JSON
+            try {
+                $body = $response->json();
+            } catch (\Exception $e) {
+                $body = [
+                    'error' => 'Invalid JSON response from server',
+                    'raw_response' => $response->body(),
+                    'content_type' => $response->header('Content-Type')
+                ];
+            }
+            
             return [
                 'error' => true,
                 'status' => $response->status(),
-                'body' => $response->json()
+                'body' => $body
             ];
         }
 
-        return $response->json();
+        // Safely parse successful response
+        try {
+            return $response->json();
+        } catch (\Exception $e) {
+            return [
+                'error' => true,
+                'message' => 'Invalid JSON response from server: ' . $e->getMessage(),
+                'raw_response' => $response->body(),
+                'content_type' => $response->header('Content-Type')
+            ];
+        }
     }
 
     /*
@@ -603,14 +624,35 @@ class ZimraDeviceService
         ]);
 
         if (!$response->successful()) {
+            // Safely parse response - might be HTML error page instead of JSON
+            try {
+                $body = $response->json();
+            } catch (\Exception $e) {
+                $body = [
+                    'error' => 'Invalid JSON response from server',
+                    'raw_response' => $response->body(),
+                    'content_type' => $response->header('Content-Type')
+                ];
+            }
+            
             return [
                 'error' => true,
                 'status' => $response->status(),
-                'body' => $response->json()
+                'body' => $body
             ];
         }
 
-        $responseData = $response->json();
+        // Safely parse successful response
+        try {
+            $responseData = $response->json();
+        } catch (\Exception $e) {
+            return [
+                'error' => true,
+                'message' => 'Invalid JSON response from server: ' . $e->getMessage(),
+                'raw_response' => $response->body(),
+                'content_type' => $response->header('Content-Type')
+            ];
+        }
 
         // Save to database
         $fiscalDay = FiscalDay::create([
@@ -908,18 +950,39 @@ class ZimraDeviceService
         ])->post("{$baseUrl}/Device/v1/{$deviceId}/CloseDay", $payload);
 
         if (!$response->successful()) {
+            // Safely parse response - might be HTML error page instead of JSON
+            try {
+                $body = $response->json();
+            } catch (\Exception $e) {
+                $body = [
+                    'error' => 'Invalid JSON response from server',
+                    'raw_response' => $response->body(),
+                    'content_type' => $response->header('Content-Type')
+                ];
+            }
+            
             Log::error('ZIMRA CloseDay Failed', [
                 'status' => $response->status(),
-                'body' => $response->json()
+                'body' => $body
             ]);
             return [
                 'error' => true,
                 'status' => $response->status(),
-                'body' => $response->json()
+                'body' => $body
             ];
         }
 
-        $responseData = $response->json();
+        // Safely parse successful response
+        try {
+            $responseData = $response->json();
+        } catch (\Exception $e) {
+            return [
+                'error' => true,
+                'message' => 'Invalid JSON response from server: ' . $e->getMessage(),
+                'raw_response' => $response->body(),
+                'content_type' => $response->header('Content-Type')
+            ];
+        }
 
         Log::info('ZIMRA CloseDay - Request accepted, polling for completion', [
             'fiscal_day_no' => $fiscalDay->fiscal_day_no,
@@ -2182,7 +2245,7 @@ class ZimraDeviceService
         |--------------------------------------------------------------------------
         | 9️⃣ Generate QR Code for Receipt Verification
         |--------------------------------------------------------------------------
-        | QR Format: {qrUrl}?deviceID={deviceID}&receiptID={receiptID}&fiscalDayNo={fiscalDayNo}&receiptGlobalNo={receiptGlobalNo}
+        | QR Format: {qrUrl}/Receipt/Result?DeviceId={DeviceId}&ReceiptDate={ReceiptDate}&ReceiptCounterReceiptGlobalNo={ReceiptCounterReceiptGlobalNo}&ReceiptQrData={ReceiptQrData}
         | CRITICAL: Use exact values from submitReceipt REQUEST (not getStatus)
         */
         $qrCodeString = null;
@@ -2190,27 +2253,86 @@ class ZimraDeviceService
         $verificationCode = null;
         
         if ($zimraConfig->qr_url && $fdmsReceiptId) {
-            // Build QR string using ZIMRA spec format
+            // Format device ID with leading zeros (10 digits)
+            $formattedDeviceId = str_pad($deviceId, 10, '0', STR_PAD_LEFT);
+            
+            // Format receipt counter/global number with leading zeros (10 digits)
+            $formattedGlobalNo = str_pad($receiptData['receiptGlobalNo'], 10, '0', STR_PAD_LEFT);
+            
+            // Format receipt date
+            $receiptDate = $receiptData['receiptDate'] ?? now()->format('Y-m-d\TH:i:s');
+            $formattedDate = urlencode(date('m/d/Y H:i:s', strtotime($receiptDate)));
+            
+            // Use FDMS server signature hash for verification code (ReceiptQrData)
+            // CRITICAL: ZIMRA expects hexadecimal format (0-9, A-F only)
+            // Server signature hash is base64-encoded, must decode and convert to hex
+            $serverSignatureHash = $responseData['receiptServerSignature']['hash'] ?? null;
+            
+            if ($serverSignatureHash) {
+                // Decode base64 hash and convert to hexadecimal
+                $binary = base64_decode($serverSignatureHash);
+                $hex = strtoupper(bin2hex($binary));
+                
+                // Take first 16 hex characters
+                $code = substr($hex, 0, 16);
+                
+                // Format as XXXX-XXXX-XXXX-XXXX
+                $verificationCode = sprintf(
+                    '%s-%s-%s-%s',
+                    substr($code, 0, 4),
+                    substr($code, 4, 4),
+                    substr($code, 8, 4),
+                    substr($code, 12, 4)
+                );
+                
+                Log::info('QR Code verification code generated from server signature', [
+                    'server_signature_base64' => $serverSignatureHash,
+                    'hex_full' => $hex,
+                    'verification_code' => $verificationCode,
+                ]);
+            } else {
+                // Fallback: generate from device signature if server signature not available
+                $deviceSignatureHash = $receiptData['receiptDeviceSignature']['hash'] ?? '';
+                $binary = base64_decode($deviceSignatureHash);
+                $hex = strtoupper(bin2hex($binary));
+                $code = substr($hex, 0, 16);
+                
+                $verificationCode = sprintf(
+                    '%s-%s-%s-%s',
+                    substr($code, 0, 4),
+                    substr($code, 4, 4),
+                    substr($code, 8, 4),
+                    substr($code, 12, 4)
+                );
+                
+                Log::warning('QR Code using device signature hash (server signature not available)', [
+                    'fdms_receipt_id' => $fdmsReceiptId,
+                    'device_signature_hash' => $deviceSignatureHash,
+                    'verification_code' => $verificationCode,
+                ]);
+            }
+            
+            // Build QR string using ZIMRA validation portal format
             $qrCodeString = $zimraConfig->qr_url .
-                '?deviceID=' . $deviceId .
-                '&receiptID=' . $fdmsReceiptId .
-                '&fiscalDayNo=' . $fiscalDayNo .
-                '&receiptGlobalNo=' . $receiptData['receiptGlobalNo'];
+                '/Receipt/Result?DeviceId=' . $formattedDeviceId .
+                '&ReceiptDate=' . $formattedDate .
+                '&ReceiptCounterReceiptGlobalNo=' . $formattedGlobalNo .
+                '&ReceiptQrData=' . $verificationCode;
             
             // Generate QR code image using ReceiptQrCodeService
             try {
                 $qrData = $this->qrCodeService->generateQrCode($qrCodeString, $fdmsReceiptId);
                 $qrCodeImageUrl = $qrData['qr_url'];
-                $verificationCode = $qrData['verification_code'];
                 
                 Log::info('QR Code Image Generated', [
                     'qr_string' => $qrCodeString,
                     'qr_image_url' => $qrCodeImageUrl,
                     'verification_code' => $verificationCode,
-                    'device_id' => $deviceId,
+                    'device_id' => $formattedDeviceId,
                     'receipt_id' => $fdmsReceiptId,
                     'fiscal_day_no' => $fiscalDayNo,
-                    'receipt_global_no' => $receiptData['receiptGlobalNo'],
+                    'receipt_global_no' => $formattedGlobalNo,
+                    'receipt_date' => $formattedDate,
                 ]);
             } catch (\Exception $e) {
                 Log::error('QR Code Image Generation Failed', [

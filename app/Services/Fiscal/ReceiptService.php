@@ -118,24 +118,44 @@ class ReceiptService
             }
 
             // STEP 6: Update receipt with FDMS response (status = submitted)
+            // Extract server signature hash for QR code verification
+            $serverSignatureHash = $fdmsResult['receiptServerSignature']['hash'] ?? null;
+            $receiptDate = $receiptData['receiptDate'] ?? now()->format('m/d/Y H:i:s');
+            
+            // Generate verification code from server signature (hexadecimal format)
+            $verificationCode = null;
+            if ($serverSignatureHash) {
+                // Decode base64 hash and convert to hexadecimal
+                $binary = base64_decode($serverSignatureHash);
+                $hex = strtoupper(bin2hex($binary));
+                
+                // Take first 16 hex characters
+                $code = substr($hex, 0, 16);
+                
+                // Format as XXXX-XXXX-XXXX-XXXX
+                $verificationCode = sprintf(
+                    '%s-%s-%s-%s',
+                    substr($code, 0, 4),
+                    substr($code, 4, 4),
+                    substr($code, 8, 4),
+                    substr($code, 12, 4)
+                );
+            }
+            
             $receipt->update([
                 'status' => 'submitted',
                 'fdms_receipt_id' => $fdmsResult['receiptID'] ?? null,
                 'fdms_operation_id' => $fdmsResult['operationID'] ?? null,
                 'fdms_server_date' => isset($fdmsResult['serverDate']) ? \Carbon\Carbon::parse($fdmsResult['serverDate']) : null,
                 'fdms_certificate_thumbprint' => $fdmsResult['receiptServerSignature']['certificateThumbprint'] ?? null,
-                'receipt_qr_code' => $this->buildQrCodeUrl($deviceId, $fdmsResult['receiptID'] ?? 0, $counters['fiscalDayNo'], $counters['receiptGlobalNo']),
+                'receipt_qr_code' => $this->buildQrCodeUrl($deviceId, $fdmsResult['receiptID'] ?? 0, $counters['fiscalDayNo'], $counters['receiptGlobalNo'], $receiptDate, $verificationCode),
+                'verification_code' => $verificationCode,
                 'zimra_response' => $fdmsResult,
                 'validation_code' => $this->getValidationCode($fdmsResult),
                 'validation_errors' => $fdmsResult['validationErrors'] ?? null,
                 'is_valid' => $this->isReceiptValid($fdmsResult),
                 'has_red_errors' => $this->hasRedErrors($fdmsResult),
                 'has_gray_errors' => $this->hasGrayErrors($fdmsResult),
-            ]);
-
-            // Generate verification code after FDMS response
-            $receipt->update([
-                'verification_code' => $this->generateVerificationCode($receipt->receipt_qr_code),
             ]);
 
             // STEP 7: Commit counters (update device_state)
@@ -329,29 +349,53 @@ class ReceiptService
         return "{$prefix}-{$globalNo}";
     }
 
-    protected function buildQrCodeUrl(int $deviceId, int $receiptId, int $fiscalDayNo, int $globalNo): string
+    protected function buildQrCodeUrl(int $deviceId, int $receiptId, int $fiscalDayNo, int $globalNo, ?string $receiptDate = null, ?string $verificationCode = null): string
     {
         $config = ZimraConfig::where('device_id', $deviceId)->first();
         $baseUrl = $config->qr_url ?? 'https://fdmstest.zimra.co.zw';
         
-        return "{$baseUrl}?deviceID={$deviceId}&receiptID={$receiptId}&fiscalDayNo={$fiscalDayNo}&receiptGlobalNo={$globalNo}";
+        // Format device ID with leading zeros (10 digits)
+        $formattedDeviceId = str_pad($deviceId, 10, '0', STR_PAD_LEFT);
+        
+        // Format receipt counter/global number with leading zeros (10 digits)
+        $formattedGlobalNo = str_pad($globalNo, 10, '0', STR_PAD_LEFT);
+        
+        // Format receipt date (default to current time if not provided)
+        $formattedDate = $receiptDate ? urlencode($receiptDate) : urlencode(now()->format('m/d/Y H:i:s'));
+        
+        // Use verification code if provided, otherwise generate placeholder
+        $qrData = $verificationCode ?? $this->generateVerificationCode('');
+        
+        // Build URL with correct ZIMRA format
+        return "{$baseUrl}/Receipt/Result?DeviceId={$formattedDeviceId}&ReceiptDate={$formattedDate}&ReceiptCounterReceiptGlobalNo={$formattedGlobalNo}&ReceiptQrData={$qrData}";
     }
 
-    protected function generateVerificationCode(string $url): string
+    protected function generateVerificationCode(string $url, ?int $deviceId = null, ?int $receiptId = null, ?int $fiscalDayNo = null, ?int $globalNo = null): string
     {
-        $parsed = parse_url($url);
-        $params = [];
-        if (isset($parsed['query'])) {
-            parse_str($parsed['query'], $params);
-        }
+        // If URL is provided, try to parse parameters from it
+        if (!empty($url)) {
+            $parsed = parse_url($url);
+            $params = [];
+            if (isset($parsed['query'])) {
+                parse_str($parsed['query'], $params);
+            }
 
-        $codeString = sprintf(
-            '%s%s%s%s',
-            $params['deviceID'] ?? '',
-            $params['receiptID'] ?? '',
-            $params['fiscalDayNo'] ?? '',
-            $params['receiptGlobalNo'] ?? ''
-        );
+            $codeString = sprintf(
+                '%s%s%s%s',
+                $params['DeviceId'] ?? $params['deviceID'] ?? '',
+                $params['ReceiptCounterReceiptGlobalNo'] ?? $params['receiptGlobalNo'] ?? '',
+                $params['fiscalDayNo'] ?? '',
+                $params['ReceiptDate'] ?? ''
+            );
+        } else {
+            // Use provided parameters directly
+            $codeString = sprintf(
+                '%s%s%s',
+                $deviceId ?? '',
+                $globalNo ?? '',
+                $fiscalDayNo ?? ''
+            );
+        }
 
         $hash = strtoupper(substr(md5($codeString), 0, 16));
         

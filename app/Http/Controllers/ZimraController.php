@@ -362,14 +362,33 @@ class ZimraController extends Controller
                 return response()->json(['error' => 'No active device configured'], 400);
             }
             
+            \Log::info('OpenDay Request', [
+                'fiscal_day_no' => $fiscalDayNo,
+                'device_id' => $config->device_id,
+                'base_url' => $config->base_url ?? 'not set',
+            ]);
+            
             $result = $zimra->openDay($fiscalDayNo, $config->device_id);
             
             if (isset($result['error']) && $result['error']) {
+                // Log detailed error information
+                \Log::error('OpenDay Failed', [
+                    'result' => $result,
+                    'status' => $result['status'] ?? 'unknown',
+                    'body' => $result['body'] ?? 'no body',
+                    'raw_response' => $result['raw_response'] ?? null,
+                ]);
+                
                 return response()->json($result, 400);
             }
             
             return response()->json($result);
         } catch (\Exception $e) {
+            \Log::error('OpenDay Exception', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            
             return response()->json([
                 'error' => $e->getMessage(),
             ], 400);

@@ -67,14 +67,18 @@ class ReceiptQrCodeService
             parse_str($parsedUrl['query'], $queryParams);
         }
 
-        // Create verification code from URL parameters
-        // Format: deviceID + receiptID + fiscalDayNo + receiptGlobalNo
+        // If ReceiptQrData is already in the URL, return it directly
+        if (isset($queryParams['ReceiptQrData'])) {
+            return $queryParams['ReceiptQrData'];
+        }
+
+        // Otherwise, generate verification code from URL parameters
+        // Format: DeviceId + ReceiptCounterReceiptGlobalNo + (fiscalDayNo if available)
         $codeString = sprintf(
-            '%s%s%s%s',
-            $queryParams['deviceID'] ?? '',
-            $queryParams['receiptID'] ?? '',
-            $queryParams['fiscalDayNo'] ?? '',
-            $queryParams['receiptGlobalNo'] ?? ''
+            '%s%s%s',
+            $queryParams['DeviceId'] ?? $queryParams['deviceID'] ?? '',
+            $queryParams['ReceiptCounterReceiptGlobalNo'] ?? $queryParams['receiptGlobalNo'] ?? '',
+            $queryParams['fiscalDayNo'] ?? ''
         );
 
         // Generate a hash and format it
