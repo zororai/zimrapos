@@ -1615,9 +1615,11 @@
 
                 async loadAllConfigs() {
                     try {
-                        const res = await fetch('/zimra/configs');
+                        // Add cache-busting parameter to ensure fresh data
+                        const res = await fetch('/zimra/configs?_=' + Date.now());
                         if (res.ok) {
                             this.allConfigs = await res.json();
+                            console.log('Loaded all configs:', this.allConfigs.length, this.allConfigs);
                             // Set selected config to active one
                             const activeConfig = this.allConfigs.find(c => c.is_active);
                             if (activeConfig) {

@@ -148,7 +148,7 @@ class ReceiptService
                 'fdms_operation_id' => $fdmsResult['operationID'] ?? null,
                 'fdms_server_date' => isset($fdmsResult['serverDate']) ? \Carbon\Carbon::parse($fdmsResult['serverDate']) : null,
                 'fdms_certificate_thumbprint' => $fdmsResult['receiptServerSignature']['certificateThumbprint'] ?? null,
-                'receipt_qr_code' => $this->buildQrCodeUrl($deviceId, $fdmsResult['receiptID'] ?? 0, $counters['fiscalDayNo'], $counters['receiptGlobalNo'], $receiptDate, $verificationCode),
+                // QR code is generated in ZimraDeviceService::submitReceipt() with device signature hash
                 'verification_code' => $verificationCode,
                 'zimra_response' => $fdmsResult,
                 'validation_code' => $this->getValidationCode($fdmsResult),

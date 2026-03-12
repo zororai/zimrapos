@@ -21,26 +21,51 @@ class ZimraController extends Controller
         $validated = $request->validate([
             'company_name' => 'required|string|max:255',
             'company_tin' => 'nullable|string|max:50',
+            'company_address' => 'nullable|string',
+            'company_email' => 'nullable|email',
+            'company_phone' => 'nullable|string|max:50',
             'base_url' => 'required|url',
             'device_model' => 'required|string',
             'device_version' => 'required|string',
         ]);
 
-        // Deactivate existing configs if this is the first one
-        $existingCount = ZimraConfig::count();
-        if ($existingCount === 0) {
-            $isActive = true;
-        } else {
-            $isActive = false;
+        // Check if company with same name already exists
+        $existingCompany = ZimraConfig::where('company_name', $validated['company_name'])->first();
+        
+        if ($existingCompany) {
+            return response()->json([
+                'message' => 'A company with this name already exists',
+                'config' => $existingCompany,
+            ], 409);
         }
+
+        // Log existing companies before deactivation
+        $existingConfigs = ZimraConfig::all(['id', 'company_name', 'is_active']);
+        \Log::info('Before deactivation', [
+            'count' => $existingConfigs->count(),
+            'companies' => $existingConfigs->toArray(),
+        ]);
+
+        // Deactivate all existing configs - new company becomes active
+        ZimraConfig::query()->update(['is_active' => false]);
 
         $config = ZimraConfig::create([
             'company_name' => $validated['company_name'],
             'company_tin' => $validated['company_tin'] ?? null,
+            'company_address' => $validated['company_address'] ?? null,
+            'company_email' => $validated['company_email'] ?? null,
+            'company_phone' => $validated['company_phone'] ?? null,
             'base_url' => $validated['base_url'],
             'device_model' => $validated['device_model'],
             'device_version' => $validated['device_version'],
-            'is_active' => $isActive,
+            'is_active' => true, // New company is always active
+        ]);
+
+        // Log all companies after creation
+        $allConfigs = ZimraConfig::all(['id', 'company_name', 'is_active']);
+        \Log::info('After creation', [
+            'count' => $allConfigs->count(),
+            'companies' => $allConfigs->toArray(),
         ]);
 
         return response()->json([
@@ -59,6 +84,11 @@ class ZimraController extends Controller
         $configs = ZimraConfig::select('id', 'company_name', 'company_tin', 'device_id', 'is_active', 'base_url', 'device_model', 'device_version')
             ->orderBy('company_name')
             ->get();
+
+        \Log::info('getAllConfigs - Returning all configurations', [
+            'count' => $configs->count(),
+            'configs' => $configs->toArray(),
+        ]);
 
         return response()->json($configs);
     }
