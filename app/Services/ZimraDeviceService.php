@@ -2253,71 +2253,62 @@ class ZimraDeviceService
         $verificationCode = null;
         
         if ($zimraConfig->qr_url && $fdmsReceiptId) {
-            // Format device ID with leading zeros (10 digits)
+            // Per FDMS API v7.2 - QR Code Format:
+            // {qrUrl}/{deviceID}{receiptDate}{receiptGlobalNo}{receiptQrData}
+            
+            // 1. Format device ID with leading zeros (10 digits)
             $formattedDeviceId = str_pad($deviceId, 10, '0', STR_PAD_LEFT);
             
-            // Format receipt counter/global number with leading zeros (10 digits)
+            // 2. Format receipt date as ddMMyyyy (8 digits)
+            $receiptDate = $receiptData['receiptDate'] ?? now()->format('Y-m-d\TH:i:s');
+            $formattedDate = date('dmY', strtotime($receiptDate));
+            
+            // 3. Format receipt global number with leading zeros (10 digits)
             $formattedGlobalNo = str_pad($receiptData['receiptGlobalNo'], 10, '0', STR_PAD_LEFT);
             
-            // Format receipt date
-            $receiptDate = $receiptData['receiptDate'] ?? now()->format('Y-m-d\TH:i:s');
-            $formattedDate = urlencode(date('m/d/Y H:i:s', strtotime($receiptDate)));
+            // 4. Generate receiptQrData from ReceiptDeviceSignature hash (first 16 hex chars)
+            // CRITICAL: Use DEVICE signature, not server signature for QR code
+            $deviceSignatureHash = $receiptData['receiptDeviceSignature']['hash'] ?? '';
             
-            // Use FDMS server signature hash for verification code (ReceiptQrData)
-            // CRITICAL: ZIMRA expects hexadecimal format (0-9, A-F only)
-            // Server signature hash is base64-encoded, must decode and convert to hex
-            $serverSignatureHash = $responseData['receiptServerSignature']['hash'] ?? null;
-            
-            if ($serverSignatureHash) {
+            if ($deviceSignatureHash) {
                 // Decode base64 hash and convert to hexadecimal
-                $binary = base64_decode($serverSignatureHash);
+                $binary = base64_decode($deviceSignatureHash);
                 $hex = strtoupper(bin2hex($binary));
                 
-                // Take first 16 hex characters
-                $code = substr($hex, 0, 16);
+                // Take first 16 hex characters (no dashes for QR code)
+                $receiptQrData = substr($hex, 0, 16);
                 
-                // Format as XXXX-XXXX-XXXX-XXXX
+                // Also create formatted verification code for display (with dashes)
                 $verificationCode = sprintf(
                     '%s-%s-%s-%s',
-                    substr($code, 0, 4),
-                    substr($code, 4, 4),
-                    substr($code, 8, 4),
-                    substr($code, 12, 4)
+                    substr($receiptQrData, 0, 4),
+                    substr($receiptQrData, 4, 4),
+                    substr($receiptQrData, 8, 4),
+                    substr($receiptQrData, 12, 4)
                 );
                 
-                Log::info('QR Code verification code generated from server signature', [
-                    'server_signature_base64' => $serverSignatureHash,
+                Log::info('QR Code generated from device signature', [
+                    'device_signature_base64' => $deviceSignatureHash,
                     'hex_full' => $hex,
+                    'receipt_qr_data' => $receiptQrData,
                     'verification_code' => $verificationCode,
                 ]);
             } else {
-                // Fallback: generate from device signature if server signature not available
-                $deviceSignatureHash = $receiptData['receiptDeviceSignature']['hash'] ?? '';
-                $binary = base64_decode($deviceSignatureHash);
-                $hex = strtoupper(bin2hex($binary));
-                $code = substr($hex, 0, 16);
-                
-                $verificationCode = sprintf(
-                    '%s-%s-%s-%s',
-                    substr($code, 0, 4),
-                    substr($code, 4, 4),
-                    substr($code, 8, 4),
-                    substr($code, 12, 4)
-                );
-                
-                Log::warning('QR Code using device signature hash (server signature not available)', [
+                Log::error('QR Code generation failed - no device signature hash', [
                     'fdms_receipt_id' => $fdmsReceiptId,
-                    'device_signature_hash' => $deviceSignatureHash,
-                    'verification_code' => $verificationCode,
                 ]);
+                $receiptQrData = str_repeat('0', 16);
+                $verificationCode = '0000-0000-0000-0000';
             }
             
-            // Build QR string using ZIMRA validation portal format
-            $qrCodeString = $zimraConfig->qr_url .
-                '/Receipt/Result?DeviceId=' . $formattedDeviceId .
-                '&ReceiptDate=' . $formattedDate .
-                '&ReceiptCounterReceiptGlobalNo=' . $formattedGlobalNo .
-                '&ReceiptQrData=' . $verificationCode;
+            // Build QR string using FDMS concatenated format
+            // Format: {qrUrl}/{deviceID}{receiptDate}{receiptGlobalNo}{receiptQrData}
+            // Example: https://invoice.zimra.co.zw/00000003210304202311122233314C8BE27663330417
+            $qrCodeString = rtrim($zimraConfig->qr_url, '/') . '/' . 
+                $formattedDeviceId . 
+                $formattedDate . 
+                $formattedGlobalNo . 
+                $receiptQrData;
             
             // Generate QR code image using ReceiptQrCodeService
             try {

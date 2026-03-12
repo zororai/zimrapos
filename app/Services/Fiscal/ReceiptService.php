@@ -354,20 +354,30 @@ class ReceiptService
         $config = ZimraConfig::where('device_id', $deviceId)->first();
         $baseUrl = $config->qr_url ?? 'https://fdmstest.zimra.co.zw';
         
-        // Format device ID with leading zeros (10 digits)
+        // Per FDMS API v7.2 - QR Code Format:
+        // {qrUrl}/{deviceID}{receiptDate}{receiptGlobalNo}{receiptQrData}
+        
+        // 1. Format device ID with leading zeros (10 digits)
         $formattedDeviceId = str_pad($deviceId, 10, '0', STR_PAD_LEFT);
         
-        // Format receipt counter/global number with leading zeros (10 digits)
+        // 2. Format receipt date as ddMMyyyy (8 digits)
+        $date = $receiptDate ? strtotime($receiptDate) : time();
+        $formattedDate = date('dmY', $date);
+        
+        // 3. Format receipt global number with leading zeros (10 digits)
         $formattedGlobalNo = str_pad($globalNo, 10, '0', STR_PAD_LEFT);
         
-        // Format receipt date (default to current time if not provided)
-        $formattedDate = $receiptDate ? urlencode($receiptDate) : urlencode(now()->format('m/d/Y H:i:s'));
+        // 4. Use verification code (without dashes) for receiptQrData
+        // Remove dashes if present
+        $receiptQrData = str_replace('-', '', $verificationCode ?? '0000000000000000');
         
-        // Use verification code if provided, otherwise generate placeholder
-        $qrData = $verificationCode ?? $this->generateVerificationCode('');
-        
-        // Build URL with correct ZIMRA format
-        return "{$baseUrl}/Receipt/Result?DeviceId={$formattedDeviceId}&ReceiptDate={$formattedDate}&ReceiptCounterReceiptGlobalNo={$formattedGlobalNo}&ReceiptQrData={$qrData}";
+        // Build QR string using FDMS concatenated format
+        // Format: {qrUrl}/{deviceID}{receiptDate}{receiptGlobalNo}{receiptQrData}
+        return rtrim($baseUrl, '/') . '/' . 
+            $formattedDeviceId . 
+            $formattedDate . 
+            $formattedGlobalNo . 
+            $receiptQrData;
     }
 
     protected function generateVerificationCode(string $url, ?int $deviceId = null, ?int $receiptId = null, ?int $fiscalDayNo = null, ?int $globalNo = null): string
