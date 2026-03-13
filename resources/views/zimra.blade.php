@@ -841,7 +841,13 @@
                                                 </button>
                                             </div>
                                             <div class="flex items-center space-x-2">
-                                                <label class="text-xs text-gray-600 w-24">Discount:</label>
+                                                <label class="text-xs text-gray-600 w-24">Tax Rate:</label>
+                                                <select x-model.number="line.taxPercent" class="w-32 px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+                                                    <template x-for="tax in taxConfig.applicableTaxes" :key="tax.taxID">
+                                                        <option :value="tax.taxPercent" x-text="`${tax.taxName} (${tax.taxPercent}%)`"></option>
+                                                    </template>
+                                                </select>
+                                                <label class="text-xs text-gray-600 w-20">Discount:</label>
                                                 <input type="number" x-model.number="line.receiptLineDiscount" placeholder="0.00" step="0.01" min="0" class="w-24 px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
                                                 <span class="text-xs text-gray-500" x-show="line.receiptLineDiscount > 0">
                                                     Net: <span class="font-medium" x-text="'$' + ((line.receiptLineQuantity * line.receiptLinePrice) - (line.receiptLineDiscount || 0)).toFixed(2)"></span>
@@ -858,41 +864,25 @@
                                 </div>
 
                                 <!-- VAT Status Banner -->
-                                <div x-show="taxConfig.message" class="p-4 rounded-lg border" :class="taxConfig.isVatRegistered ? 'bg-green-50 border-green-200 text-green-800' : 'bg-yellow-50 border-yellow-200 text-yellow-800'">
+                                <div x-show="taxConfig.message" class="p-4 rounded-lg border" :class="taxConfig.isVatRegistered ? 'bg-green-50 border-green-200 text-green-800' : 'bg-blue-50 border-blue-200 text-blue-800'">
                                     <div class="flex items-start space-x-2">
                                         <svg class="w-5 h-5 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                                             <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
                                         </svg>
                                         <div>
                                             <p class="font-medium" x-text="taxConfig.message"></p>
-                                            <p class="text-sm mt-1" x-show="!taxConfig.isVatRegistered">Only 0% tax is available for this device.</p>
                                         </div>
                                     </div>
                                 </div>
 
-                                <!-- Payment & Tax -->
-                                <div class="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
-                                        <select x-model="receiptForm.paymentMethod" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
-                                            <option value="Cash">Cash</option>
-                                            <option value="Card">Card</option>
-                                            <option value="MobileMoney">Mobile Money</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">
-                                            Tax Rate
-                                            <span x-show="!taxConfig.isVatRegistered" class="text-xs text-yellow-600">(Auto-set to 0%)</span>
-                                        </label>
-                                        <select x-model.number="receiptForm.taxPercent" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" :disabled="!taxConfig.isVatRegistered">
-                                            <template x-for="tax in taxConfig.applicableTaxes" :key="tax.taxID">
-                                                <option :value="tax.taxPercent" x-text="`${tax.taxName} (${tax.taxPercent}%)`"></option>
-                                            </template>
-                                        </select>
-                                        <p class="text-xs text-gray-500 mt-1" x-show="taxConfig.isVatRegistered">Select tax rate from FDMS configuration</p>
-                                        <p class="text-xs text-yellow-600 mt-1" x-show="!taxConfig.isVatRegistered">Tax field is disabled - device not VAT registered</p>
-                                    </div>
+                                <!-- Payment Method -->
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
+                                    <select x-model="receiptForm.paymentMethod" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                                        <option value="Cash">Cash</option>
+                                        <option value="Card">Card</option>
+                                        <option value="MobileMoney">Mobile Money</option>
+                                    </select>
                                 </div>
 
                                 <!-- Date Issued and Payment Due -->
@@ -2120,12 +2110,18 @@
                 },
                 
                 addReceiptLine() {
+                    // Get default tax rate (first available tax or 0%)
+                    const defaultTax = this.taxConfig.applicableTaxes.length > 0 
+                        ? this.taxConfig.applicableTaxes[0].taxPercent 
+                        : 0;
+                    
                     this.receiptForm.receiptLines.push({
                         receiptLineName: '',
                         receiptLineQuantity: 1,
                         receiptLinePrice: 0,
                         receiptLineDiscount: 0,
-                        receiptLineHSCode: ''
+                        receiptLineHSCode: '',
+                        taxPercent: defaultTax
                     });
                 },
                 
@@ -2157,8 +2153,46 @@
                         
                         // Step 2: Proceed with receipt submission
                         const total = this.calculateTotal();
-                        const taxAmount = total * (this.receiptForm.taxPercent / 100);
                         const counter = (this.fiscalDay?.fiscal_day?.receipt_counter || 0) + 1;
+                        
+                        // Build receipt lines and calculate tax totals by taxID
+                        const receiptLines = [];
+                        const taxTotalsMap = {}; // Group taxes by taxID
+                        
+                        this.receiptForm.receiptLines.forEach((line, i) => {
+                            const lineTaxPercent = line.taxPercent !== undefined ? line.taxPercent : 0;
+                            const lineTotal = line.receiptLineQuantity * line.receiptLinePrice;
+                            const taxID = this.getTaxIDByPercent(lineTaxPercent);
+                            
+                            // Add to receipt lines
+                            receiptLines.push({
+                                receiptLineType: 'Sale',
+                                receiptLineNo: i + 1,
+                                receiptLineHSCode: line.receiptLineHSCode || '00000000',
+                                receiptLineName: line.receiptLineName,
+                                receiptLinePrice: line.receiptLinePrice,
+                                receiptLineQuantity: line.receiptLineQuantity,
+                                receiptLineTotal: lineTotal,
+                                taxPercent: lineTaxPercent,
+                                taxID: taxID
+                            });
+                            
+                            // Accumulate tax totals by taxID
+                            if (!taxTotalsMap[taxID]) {
+                                taxTotalsMap[taxID] = {
+                                    taxID: taxID,
+                                    taxPercent: lineTaxPercent,
+                                    taxAmount: 0,
+                                    salesAmountWithTax: 0
+                                };
+                            }
+                            const taxAmount = lineTotal * (lineTaxPercent / 100);
+                            taxTotalsMap[taxID].taxAmount += taxAmount;
+                            taxTotalsMap[taxID].salesAmountWithTax += lineTotal;
+                        });
+                        
+                        // Convert tax totals map to array
+                        const receiptTaxes = Object.values(taxTotalsMap);
                         
                         const payload = {
                             // receiptType auto-determined by backend based on VAT registration
@@ -2168,26 +2202,8 @@
                             invoiceNo: this.receiptForm.invoiceNo,
                             receiptDate: new Date().toISOString().slice(0, 19),
                             receiptLinesTaxInclusive: true,
-                            receiptLines: this.receiptForm.receiptLines.map((line, i) => {
-                                console.log('Line HS Code:', line.receiptLineHSCode); // Debug
-                                return {
-                                    receiptLineType: 'Sale',
-                                    receiptLineNo: i + 1,
-                                    receiptLineHSCode: line.receiptLineHSCode || '00000000',
-                                    receiptLineName: line.receiptLineName,
-                                    receiptLinePrice: line.receiptLinePrice,
-                                    receiptLineQuantity: line.receiptLineQuantity,
-                                    receiptLineTotal: line.receiptLineQuantity * line.receiptLinePrice,
-                                    taxPercent: this.receiptForm.taxPercent,
-                                    taxID: this.getTaxID()
-                                };
-                            }),
-                            receiptTaxes: [{
-                                taxPercent: this.receiptForm.taxPercent,
-                                taxID: this.getTaxID(),
-                                taxAmount: taxAmount,
-                                salesAmountWithTax: total
-                            }],
+                            receiptLines: receiptLines,
+                            receiptTaxes: receiptTaxes,
                             receiptPayments: [{
                                 moneyTypeCode: this.receiptForm.paymentMethod,
                                 paymentAmount: total
@@ -2405,6 +2421,12 @@
                 getTaxID() {
                     // Find tax by taxPercent from FDMS config
                     const tax = this.taxConfig.applicableTaxes.find(t => t.taxPercent === this.receiptForm.taxPercent);
+                    return tax ? tax.taxID : 513; // Default to 513 (0% tax)
+                },
+
+                getTaxIDByPercent(taxPercent) {
+                    // Find tax by specific taxPercent from FDMS config
+                    const tax = this.taxConfig.applicableTaxes.find(t => t.taxPercent === taxPercent);
                     return tax ? tax.taxID : 513; // Default to 513 (0% tax)
                 },
 

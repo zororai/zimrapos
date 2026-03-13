@@ -987,18 +987,22 @@ class ZimraController extends Controller
             
             $vatNumber = $fdmsConfig['vatNumber'] ?? null;
             $isVatRegistered = $vatNumber && $vatNumber !== 'NOT_REGISTERED';
-            $applicableTaxes = $fdmsConfig['applicableTaxes'] ?? [];
             
-            // Format taxes for frontend
+            // Fetch ALL taxes from Tax Management database (panier_taxes)
+            // This ensures all configured taxes are available regardless of FDMS response
+            $dbTaxes = \App\Models\PanierTax::all();
+            
+            // Format taxes for frontend from database
             $formattedTaxes = [];
-            foreach ($applicableTaxes as $tax) {
+            foreach ($dbTaxes as $dbTax) {
                 $formattedTaxes[] = [
-                    'taxID' => $tax['taxID'] ?? null,
-                    'taxPercent' => $tax['taxPercent'] ?? 0.0,
-                    'taxName' => $tax['taxName'] ?? 'Unknown',
-                    'taxCode' => $tax['taxCode'] ?? null,
-                    'validFrom' => $tax['validFrom'] ?? $tax['taxValidFrom'] ?? null,
-                    'validTill' => $tax['validTill'] ?? $tax['taxValidTill'] ?? null,
+                    'taxID' => $dbTax->zimra_tax_id,
+                    'taxPercent' => (float) $dbTax->percentage,
+                    'taxName' => $dbTax->name,
+                    'taxCode' => $dbTax->code,
+                    'percentage' => (float) $dbTax->percentage,
+                    'validFrom' => null,
+                    'validTill' => null,
                 ];
             }
 
@@ -1009,7 +1013,7 @@ class ZimraController extends Controller
                 'deviceOperatingMode' => $fdmsConfig['deviceOperatingMode'] ?? 'Unknown',
                 'message' => $isVatRegistered 
                     ? 'Device is VAT registered. All tax rates available.' 
-                    : 'Device is NOT VAT registered. Only 0% tax allowed.',
+                    : 'Device is NOT VAT registered. Testing Mode: All tax rates available for testing.',
             ]);
         } catch (\Exception $e) {
             Log::error('getTaxConfig failed', [

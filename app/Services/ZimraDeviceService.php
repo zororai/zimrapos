@@ -1884,7 +1884,9 @@ class ZimraDeviceService
         | 3️⃣ Validate VAT Registration (Fix RCPT021)
         |--------------------------------------------------------------------------
         */
+        // TESTING MODE: Allow all tax rates even for non-VAT registered devices
         // If device not VAT registered, only allow 0% tax
+        /*
         if (!$vatNumber || $vatNumber === 'NOT_REGISTERED') {
             foreach ($receiptData['receiptLines'] ?? [] as $line) {
                 $lineTaxPercent = (float) ($line['taxPercent'] ?? 0);
@@ -1897,6 +1899,8 @@ class ZimraDeviceService
             }
             Log::info('VAT Validation: Device not registered, verified all lines are 0% tax');
         }
+        */
+        Log::warning('TESTING MODE: VAT registration validation disabled - all tax rates allowed');
 
         /*
         |--------------------------------------------------------------------------
