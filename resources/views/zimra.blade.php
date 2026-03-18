@@ -1813,8 +1813,8 @@
                 async saveConfig() {
                     this.loading = true;
                     try {
-                        const method = this.config ? 'PUT' : 'POST';
-                        const url = this.config ? `/zimra/config/${this.config.id}` : '/zimra/config';
+                        const method = 'POST';
+                        const url = '/zimra/config';
                         
                         const res = await fetch(url, {
                             method: method,
@@ -1828,7 +1828,7 @@
                         const data = await res.json();
                         
                         if (res.ok) {
-                            this.showMessage('Company added successfully!', 'success');
+                            this.showMessage(data.message || 'Company added successfully!', 'success');
                             await this.loadAllConfigs();
                             await this.loadConfig();
                             // Clear form for next entry
