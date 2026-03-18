@@ -110,8 +110,8 @@
             </div>
             <div class="bg-white rounded-xl border border-gray-200 p-6">
                 <p class="text-sm text-gray-500 mb-1">Fiscal Day</p>
-                <p class="text-3xl font-bold {{ $companies->where('fiscal_day_status', 'opened')->count() > 0 ? 'text-green-600' : 'text-gray-400' }}">
-                    {{ $companies->where('fiscal_day_status', 'opened')->count() > 0 ? 'Open' : 'Closed' }}
+                <p class="text-3xl font-bold {{ $companies->where('fiscal_day_status', 'FiscalDayOpened')->count() > 0 ? 'text-green-600' : 'text-gray-400' }}">
+                    {{ $companies->where('fiscal_day_status', 'FiscalDayOpened')->count() > 0 ? 'Open' : 'Closed' }}
                 </p>
             </div>
         </div>
@@ -138,7 +138,7 @@
                         <td class="px-6 py-4 font-medium text-gray-900">{{ $company->company_name }}</td>
                         <td class="px-6 py-4 text-gray-500">{{ $company->device_id ? '#'.$company->device_id : '—' }}</td>
                         <td class="px-6 py-4">
-                            @if($company->fiscal_day_status === 'opened')
+                            @if($company->fiscal_day_status === 'FiscalDayOpened')
                                 <span class="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-medium">Open</span>
                             @else
                                 <span class="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs font-medium">Closed</span>
