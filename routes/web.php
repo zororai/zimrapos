@@ -61,3 +61,5 @@ Route::middleware(['auth', 'subscription'])->group(function () {
 
 // Test Route (dev only)
 Route::get('/test-zimra', [\App\Http\Controllers\ZimraTestController::class, 'test']);
+
+require __DIR__.'/auth.php';
