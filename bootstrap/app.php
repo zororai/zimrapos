@@ -25,6 +25,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             ProcessQueueJobs::class,
         ]);
+        $middleware->alias([
+            'subscription' => \App\Http\Middleware\SubscriptionActive::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
