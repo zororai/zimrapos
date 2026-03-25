@@ -410,6 +410,16 @@ class ZimraDeviceService
             'certificate' => $certificatePem,
         ]);
 
+        DeviceState::firstOrCreate(
+            ['device_id' => $deviceId],
+            [
+                'last_receipt_global_no'  => 0,
+                'last_receipt_counter'    => 0,
+                'last_fiscal_day_no'      => 0,
+                'requires_reconciliation' => false,
+            ]
+        );
+
         return [
             "message" => "Device registered successfully",
             "operationID" => $response->json()['operationID']
@@ -452,6 +462,16 @@ class ZimraDeviceService
         ]);
 
         Log::info('Certificates uploaded for device', ['device_id' => $deviceId, 'serial_number' => $serialNumber]);
+
+        DeviceState::firstOrCreate(
+            ['device_id' => $deviceId],
+            [
+                'last_receipt_global_no'  => 0,
+                'last_receipt_counter'    => 0,
+                'last_fiscal_day_no'      => 0,
+                'requires_reconciliation' => false,
+            ]
+        );
 
         return [
             "message" => "Certificates uploaded successfully",
