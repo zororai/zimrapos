@@ -2585,14 +2585,19 @@ class ZimraDeviceService
                 $normalizedTaxes = [];
                 foreach ($configResponse['applicableTaxes'] as $idx => $tax) {
                     // Normalize field names for sandbox compatibility
-                    $normalizedTax = [
-                        'taxID' => $tax['taxID'] ?? null,
-                        'taxPercent' => $tax['taxPercent'] ?? 0.0,
-                        'taxName' => $tax['taxName'] ?? 'Unknown',
-                        'taxCode' => $tax['taxCode'] ?? null, // Optional - sandbox doesn't provide
+                    $taxEntry = [
+                        'taxID'       => $tax['taxID'] ?? null,
+                        'taxPercent'  => $tax['taxPercent'] ?? 0.0,
+                        'taxName'     => $tax['taxName'] ?? 'Unknown',
                         'taxValidFrom' => $tax['taxValidFrom'] ?? $tax['validFrom'] ?? null,
                         'taxValidTill' => $tax['taxValidTill'] ?? $tax['validTill'] ?? null,
                     ];
+                    // RCPT012 fix: FDMS sandbox omits taxCode from GetConfig but
+                    // SubmitReceipt requires it. Derive from ZIMRA_TAX_TYPES by taxID,
+                    // then fall back to percent/name inference.
+                    $taxEntry['taxCode'] = $tax['taxCode']
+                        ?? $this->deriveTaxCode((int)($tax['taxID'] ?? 0), (float)($tax['taxPercent'] ?? 0), $tax['taxName'] ?? '');
+                    $normalizedTax = $taxEntry;
                     
                     Log::info("RCPT014 DEBUG: Tax[$idx]", [
                         'taxID' => $normalizedTax['taxID'],
@@ -3113,6 +3118,33 @@ class ZimraDeviceService
     {
         $pow = bcpow('10', (string) $precision, 0);
         return bcdiv(bcadd(bcmul($value, $pow, $precision + 1), '0.5', $precision + 1), $pow, $precision);
+    }
+
+    /**
+     * Derive ZIMRA taxCode when FDMS GetConfig omits it (sandbox gap).
+     * Lookup by taxID in known ZIMRA_TAX_TYPES first; infer from percent/name otherwise.
+     */
+    private function deriveTaxCode(int $taxID, float $taxPercent, string $taxName): ?string
+    {
+        // 1. Known ZIMRA tax IDs
+        $known = \App\Models\PanierTax::ZIMRA_TAX_TYPES;
+        if (isset($known[$taxID])) {
+            return $known[$taxID]['code'];
+        }
+
+        // 2. Infer from tax name keywords
+        $name = strtolower($taxName);
+        if (str_contains($name, 'exempt'))    return 'E';
+        if (str_contains($name, 'zero'))      return 'Z';
+        if (str_contains($name, 'withhold'))  return 'W';
+        if (str_contains($name, 'non-vat') || str_contains($name, 'non vat')) return 'E';
+
+        // 3. Infer from percent
+        if ($taxPercent == 0.0)  return 'E'; // Default 0% → Exempt
+        if ($taxPercent == 15.5 || $taxPercent == 15.0) return 'A'; // Standard VAT
+        if ($taxPercent == 5.0)  return 'W'; // Withholding
+
+        return null;
     }
 
     /**
