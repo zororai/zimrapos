@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Models\FiscalizationRequest;
+use App\Models\ZimraConfig;
+use App\Services\ZimraDeviceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -111,6 +113,77 @@ class ZimraController extends BaseController
                 'status' => $fiscalizationRequest->status,
             ],
         ], 201);
+    }
+
+    /**
+     * @OA\Post(
+     *     path="/zimra/receipt",
+     *     summary="Submit a fiscal receipt to ZIMRA",
+     *     description="Sign and submit a receipt to the ZIMRA FDMS. Handles counter assignment, hashing, mTLS, and persistence.",
+     *     operationId="zimraSubmitReceipt",
+     *     tags={"ZIMRA Fiscalisation"},
+     *     security={{"AppId": {}, "ApiKey": {}}},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"receiptType","receiptCurrency","receiptDate","receiptLines","receiptPayments"},
+     *             @OA\Property(property="receiptType", type="string", enum={"FiscalInvoice","CreditNote","DebitNote"}, example="FiscalInvoice"),
+     *             @OA\Property(property="receiptCurrency", type="string", example="USD"),
+     *             @OA\Property(property="receiptDate", type="string", format="date-time", example="2026-04-18T10:00:00"),
+     *             @OA\Property(property="receiptLinesTaxInclusive", type="boolean", example=false),
+     *             @OA\Property(property="invoiceNo", type="string", example="INV-001"),
+     *             @OA\Property(property="receiptLines", type="array", @OA\Items(type="object")),
+     *             @OA\Property(property="receiptPayments", type="array", @OA\Items(type="object")),
+     *             @OA\Property(property="buyerData", type="object"),
+     *             @OA\Property(property="receiptNotes", type="string")
+     *         )
+     *     ),
+     *     @OA\Response(response=200, description="Receipt submitted successfully"),
+     *     @OA\Response(response=400, description="Validation error or ZIMRA rejection"),
+     *     @OA\Response(response=402, description="Expired subscription"),
+     *     @OA\Response(response=403, description="Incorrect API credentials"),
+     *     @OA\Response(response=422, description="Missing headers"),
+     *     @OA\Response(response=429, description="Rate limit exceeded")
+     * )
+     */
+    public function submitReceipt(Request $request, ZimraDeviceService $zimra): JsonResponse
+    {
+        $validated = $request->validate([
+            'receiptType'              => 'required|string|in:FiscalInvoice,CreditNote,DebitNote',
+            'receiptCurrency'          => 'required|string|size:3',
+            'receiptDate'              => 'required|string',
+            'receiptLinesTaxInclusive' => 'boolean',
+            'invoiceNo'                => 'nullable|string',
+            'receiptLines'             => 'required|array|min:1',
+            'receiptLines.*.receiptLineType'     => 'required|string',
+            'receiptLines.*.receiptLineName'     => 'required|string',
+            'receiptLines.*.receiptLinePrice'    => 'required|numeric',
+            'receiptLines.*.receiptLineQuantity' => 'required|numeric',
+            'receiptPayments'          => 'required|array|min:1',
+            'receiptPayments.*.moneyTypeCode'    => 'required|string',
+            'receiptPayments.*.paymentAmount'    => 'required|numeric',
+            'buyerData'                => 'nullable|array',
+            'receiptNotes'             => 'nullable|string',
+        ]);
+
+        $config = ZimraConfig::where('is_active', true)->first();
+
+        if (!$config) {
+            return $this->errorResponse('No active ZIMRA device configuration found', 400);
+        }
+
+        try {
+            $result = $zimra->submitReceipt($validated, $config->device_id);
+
+            if (isset($result['error']) && $result['error']) {
+                return $this->errorResponse($result['error'] ?? 'ZIMRA submission failed', 400);
+            }
+
+            return $this->successResponse($result);
+        } catch (\Exception $e) {
+            \Log::error('zimra.submitReceipt failed', ['error' => $e->getMessage()]);
+            return $this->errorResponse($e->getMessage(), 400);
+        }
     }
 
     /**
